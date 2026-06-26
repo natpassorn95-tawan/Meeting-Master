@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { api } from "../api.js";
-import { ACCENT, GREEN, RED, AMBER, BROWN, card, btn, pill } from "../ui.js";
+import { ACCENT, GREEN, RED, BROWN, card, btn, pill } from "../ui.js";
 import { useT, fmtDateTimeI18n } from "../i18n.jsx";
 
 const WD = { zh: ["日", "一", "二", "三", "四", "五", "六"], en: ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"] };
@@ -162,7 +162,7 @@ export default function HostCalendar({ go }) {
           <p style={{ margin: 0, fontSize: 14, color: "var(--color-text-tertiary,#999)" }}>{events.length ? t("attendee.noMeetingsDay") : t("attendee.selectDay")}</p>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {dayEvents.map((ev, idx) => <EventRow key={idx} ev={ev} t={t} lang={lang} busy={busy} onOpen={open} />)}
+            {dayEvents.map((ev, idx) => <EventRow key={idx} ev={ev} past={selected < todayStr} t={t} lang={lang} busy={busy} onOpen={open} />)}
           </div>
         )}
       </div>
@@ -176,11 +176,11 @@ export default function HostCalendar({ go }) {
           ) : (
             <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 14 }}>
               <Section title={`${t("hostcal.upcomingGroup")} (${upcoming.length})`}>
-                {upcoming.length ? upcoming.map((ev, i) => <EventRow key={i} ev={ev} t={t} lang={lang} busy={busy} onOpen={open} onTrash={ev.type === "meeting" ? () => act(() => api.trashMeeting(ev.id)) : null} />)
+                {upcoming.length ? upcoming.map((ev, i) => <EventRow key={i} ev={ev} past={false} t={t} lang={lang} busy={busy} onOpen={open} onTrash={ev.type === "meeting" ? () => act(() => api.trashMeeting(ev.id)) : null} />)
                   : <Empty t={t} />}
               </Section>
               <Section title={`${t("hostcal.passedGroup")} (${passed.length})`}>
-                {passed.length ? passed.map((ev, i) => <EventRow key={i} ev={ev} t={t} lang={lang} busy={busy} onOpen={open} onTrash={ev.type === "meeting" ? () => act(() => api.trashMeeting(ev.id)) : null} />)
+                {passed.length ? passed.map((ev, i) => <EventRow key={i} ev={ev} past={true} t={t} lang={lang} busy={busy} onOpen={open} onTrash={ev.type === "meeting" ? () => act(() => api.trashMeeting(ev.id)) : null} />)
                   : <Empty t={t} />}
               </Section>
             </div>
@@ -240,15 +240,15 @@ function Empty({ t }) {
   return <p style={{ margin: 0, fontSize: 13, color: "var(--color-text-tertiary,#999)" }}>{t("hostcal.none")}</p>;
 }
 
-function EventRow({ ev, t, lang, busy, onOpen, onTrash }) {
+function EventRow({ ev, past, t, lang, busy, onOpen, onTrash }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 12px", border: "0.5px solid rgba(0,0,0,.12)", borderRadius: 10, flexWrap: "wrap", background: "#fff" }}>
       <button onClick={() => onOpen(ev)} disabled={busy} style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2, background: "transparent", border: "none", cursor: "pointer", textAlign: "left", padding: 0 }}>
         <span style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <span style={{ fontSize: 15, fontWeight: 500 }}>{ev.title || "（未命名會議）"}</span>
-          {ev.type === "scheduled"
-            ? <span style={pill("#FFF6E5", AMBER)}>{t("hostcal.tagScheduled")}</span>
-            : <span style={pill("#E1F5EE", GREEN)}>{t("hostcal.tagCreated")}</span>}
+          {past
+            ? <span style={pill(BROWN + "22", BROWN)}>{t("hostcal.legendPassed")}</span>
+            : <span style={pill(ACCENT + "1F", ACCENT)}>{t("hostcal.legendUpcoming")}</span>}
         </span>
         <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>
           {fmtDateTimeI18n(ev.date, ev.startTime, ev.endTime, lang)}{ev.location ? `・${ev.location}` : ""}
