@@ -4,7 +4,7 @@ import { card, btn, pill, avatar, GREEN, RED, ACCENT, AMBER, STANCE_META } from 
 import { useT } from "../i18n.jsx";
 
 export default function HostDashboard({ meetingId, go }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [reminding, setReminding] = useState(false);
@@ -55,6 +55,34 @@ export default function HostDashboard({ meetingId, go }) {
     finally { setSendingCk(false); load(); }
   }
 
+  // Download the attendee responses as a CSV (UTF-8 BOM → opens in Excel).
+  function downloadReport() {
+    const en = lang === "en";
+    const fmtDT = (ms) => ms ? new Date(ms).toLocaleString(en ? "en-US" : "zh-TW") : (en ? "—" : "—");
+    const statusOf = (r) => r.rsvp === "yes" ? (en ? "Confirmed" : "已確認") : r.rsvp === "leave" ? (en ? "Leave" : "請假") : (en ? "No reply" : "未回覆");
+    const header = en
+      ? ["Name", "Employee ID / Dept", "Status", "Leave reason", "Agenda read", "Checked in", "Comments"]
+      : ["姓名", "員工編號 / 部門", "出席狀態", "請假事由", "議程已讀", "報到時間", "議程意見"];
+    const esc = (v) => { const s = String(v ?? ""); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+    const rows = [header];
+    for (const p of roster) {
+      const r = byId[p.id];
+      const leave = r.rsvp === "leave" && r.leaveReason ? `${t(`leaveType.${r.leaveReason.type}`)}${r.leaveReason.text ? ` ${r.leaveReason.text}` : ""}` : "";
+      const comments = topics
+        .map((tp) => { const c = r.comments?.[tp.id]; return c && c.stance !== "none" ? `${tp.order}.${tp.title}: ${t(`stance.${c.stance}`)}${c.text ? `(${c.text})` : ""}` : null; })
+        .filter(Boolean).join(" | ");
+      rows.push([p.name, p.dept, statusOf(r), leave, r.agendaReadAt ? fmtDT(r.agendaReadAt) : "", r.checkedInAt ? fmtDT(r.checkedInAt) : "", comments]);
+    }
+    const csv = "﻿" + rows.map((row) => row.map(esc).join(",")).join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${(meeting.title || "meeting").replace(/[^\w一-鿿-]+/g, "_")}_${meeting.datetime ? meeting.id : meetingId}_attendance.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }
+
   const stat = (n, lbl, color) => (
     <div style={{ textAlign: "center", flex: 1 }}>
       <div style={{ fontSize: 26, fontWeight: 600, color }}>{n}</div>
@@ -84,7 +112,8 @@ export default function HostDashboard({ meetingId, go }) {
       <div style={card}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 500 }}>{t("host.rosterTitle")}</h3>
-          <div style={{ display: "flex", gap: 6 }}>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <button onClick={downloadReport} style={{ ...btn(false), height: 32, fontSize: 12 }}>{t("host.download")}</button>
             <button onClick={sendCheckin} disabled={sendingCk} style={{ ...btn(false), height: 32, fontSize: 12 }}>
               {sendingCk ? t("host.sendingCheckin") : t("host.sendCheckin")}
             </button>
