@@ -482,6 +482,15 @@ function updateSchedule(id, patch) {
 function deleteSchedule(id) {
   delete store.schedules[id];
   store.scheduleOrder = store.scheduleOrder.filter((x) => x !== id);
+  // Cascade: drop every materialised occurrence of this schedule so it also
+  // disappears from the Host calendar, plus its standing-attendance record.
+  let removed = 0;
+  for (const mid of Object.keys(store.meetings)) {
+    if (scheduleIdOf(mid) === id) { delete store.meetings[mid]; removed++; }
+  }
+  store.order = store.order.filter((x) => scheduleIdOf(x) !== id);
+  delete store.standing[id];
+  return removed;
 }
 
 export { ymd, nextOccurrence, occurrencesInRange, recurrenceSummary, decorateSchedule, createSchedule, listSchedules, getSchedule, updateSchedule, deleteSchedule };
