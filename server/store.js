@@ -26,7 +26,7 @@ function fmtDatetime(date, start, end) {
   return time ? `${dateStr} ${time}` : dateStr;
 }
 
-const store = { meetings: {}, order: [], schedules: {}, scheduleOrder: [], members: {}, standing: {}, deleted: {}, cancelled: {} };
+const store = { meetings: {}, order: [], schedules: {}, scheduleOrder: [], members: {}, standing: {}, deleted: {}, cancelled: {}, tombstones: {} };
 
 // ── Persistence (data/store.json) ──────────────────────────────────────
 const DATA_FILE = fileURLToPath(new URL("../data/store.json", import.meta.url));
@@ -38,7 +38,7 @@ function saveStore() {
     fs.writeFileSync(DATA_FILE, JSON.stringify({
       meetings: store.meetings, order: store.order,
       schedules: store.schedules, scheduleOrder: store.scheduleOrder,
-      members: store.members, standing: store.standing, deleted: store.deleted, cancelled: store.cancelled, seq,
+      members: store.members, standing: store.standing, deleted: store.deleted, cancelled: store.cancelled, tombstones: store.tombstones, seq,
     }));
   } catch (e) { console.error("[store] save failed", e.message); }
 }
@@ -59,6 +59,7 @@ function loadStore() {
     store.standing = d.standing || {};
     store.deleted = d.deleted || {};
     store.cancelled = d.cancelled || {};
+    store.tombstones = d.tombstones || {};
     if (typeof d.seq === "number") seq = d.seq;
     console.log(`[store] loaded ${store.order.length} meetings, ${store.scheduleOrder.length} schedules, ${Object.keys(store.members).length} members`);
   } catch (e) { console.error("[store] load failed (starting fresh)", e.message); }
@@ -175,7 +176,7 @@ function createMeeting(input) {
   };
   store.meetings[id] = meeting;
   if (!store.order.includes(id)) store.order.unshift(id);
-  delete store.deleted[id]; delete store.cancelled[id]; // recreating supersedes any trashed/cancelled copy
+  delete store.deleted[id]; delete store.cancelled[id]; delete store.tombstones[id]; // recreating supersedes any trashed/cancelled/tombstoned copy
   return meeting;
 }
 
@@ -514,11 +515,13 @@ function restoreMeeting(id) {
   store.meetings[id] = m;
   if (!store.order.includes(id)) store.order.unshift(id);
   delete store.deleted[id];
+  delete store.tombstones[id];
   return m;
 }
 function purgeMeeting(id) {
   if (!store.deleted[id]) return false;
   delete store.deleted[id];
+  tombstone(id);
   return true;
 }
 function listDeleted() {
@@ -544,23 +547,37 @@ function restoreCancelled(id) {
   store.meetings[id] = m;
   if (!store.order.includes(id)) store.order.unshift(id);
   delete store.cancelled[id];
+  delete store.tombstones[id];
   return m;
 }
 function purgeCancelled(id) {
   if (!store.cancelled[id]) return false;
   delete store.cancelled[id];
+  tombstone(id);
   return true;
 }
 function listCancelled() {
   return Object.values(store.cancelled).sort((a, b) => (b.cancelledAt || 0) - (a.cancelledAt || 0));
 }
 
-// In either bucket → don't re-project this occurrence onto the calendar.
-function isTrashed(id) {
-  return !!store.deleted[id] || !!store.cancelled[id];
+// ── Tombstones ─────────────────────────────────────────────────────────
+// Permanently deleting a schedule occurrence leaves a tombstone so the still-
+// enabled schedule never re-projects (resurrects) that occurrence again. Only
+// occurrence ids (schedule__date) are tombstoned; standalone meetings can't be
+// re-projected, so there's nothing to suppress.
+function tombstone(id) {
+  if (scheduleIdOf(id)) store.tombstones[id] = true;
+}
+function isTombstoned(id) {
+  return !!store.tombstones[id];
 }
 
-export { ymd, nextOccurrence, occurrencesInRange, recurrenceSummary, decorateSchedule, createSchedule, listSchedules, getSchedule, updateSchedule, deleteSchedule, trashMeeting, restoreMeeting, purgeMeeting, listDeleted, cancelMeeting, restoreCancelled, purgeCancelled, listCancelled, isTrashed };
+// In a trash bucket or tombstoned → don't re-project this occurrence.
+function isTrashed(id) {
+  return !!store.deleted[id] || !!store.cancelled[id] || !!store.tombstones[id];
+}
+
+export { ymd, nextOccurrence, occurrencesInRange, recurrenceSummary, decorateSchedule, createSchedule, listSchedules, getSchedule, updateSchedule, deleteSchedule, trashMeeting, restoreMeeting, purgeMeeting, listDeleted, cancelMeeting, restoreCancelled, purgeCancelled, listCancelled, isTrashed, isTombstoned };
 
 // A participant's meetings (by name). One row per schedule = the NEAREST
 // upcoming occurrence (weekly/monthly collapse to a single row); one-time
