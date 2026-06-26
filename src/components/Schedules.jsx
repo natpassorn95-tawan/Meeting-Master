@@ -102,10 +102,12 @@ export default function Schedules({ go }) {
                     {busyId === s.id ? t("sched.sending") : t("sched.runNow")}
                   </button>
                 ) : null}
-                <div style={{ display: "flex", gap: 6 }}>
-                  {!isPassed ? <button onClick={() => toggle(s)} style={{ ...btn(false), height: 30, fontSize: 12 }}>{s.enabled ? t("sched.disable") : t("sched.enable")}</button> : null}
-                  <button onClick={() => remove(s.id)} style={{ ...btn(false), height: 30, fontSize: 12, color: RED, borderColor: RED + "55" }}>{t("common.delete")}</button>
-                </div>
+                {!isPassed ? (
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button onClick={() => toggle(s)} style={{ ...btn(false), height: 30, fontSize: 12 }}>{s.enabled ? t("sched.disable") : t("sched.enable")}</button>
+                    <button onClick={() => remove(s.id)} style={{ ...btn(false), height: 30, fontSize: 12, color: RED, borderColor: RED + "55" }}>{t("common.delete")}</button>
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>
