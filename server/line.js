@@ -153,6 +153,14 @@ export function buildReminderMessage(meeting, baseUrl = "") {
   };
 }
 
+// Cancellation notice — sent to attendees when the host cancels a meeting.
+export function buildCancelMessage(meeting) {
+  return {
+    type: "text",
+    text: `⚠️ 會議取消通知\n${meeting.title || "會議"}\n${meeting.datetime || ""}\n\n此會議已取消，您無需出席。造成不便敬請見諒。`,
+  };
+}
+
 // Welcome + registration prompt sent when someone first adds the OA.
 // Links to the web form that collects Name / Employee ID / Email.
 export function buildRegistrationMessage(userId, baseUrl = "") {

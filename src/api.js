@@ -44,6 +44,7 @@ export const api = {
   getResponses: (id) => req(`/meetings/${id}/responses`),
   notify: (id, mode, to) => post(`/meetings/${id}/notify`, { mode, to }),
   remindUnread: (id) => post(`/meetings/${id}/remind-unread`),
+  cancelMeeting: (id) => post(`/meetings/${id}/cancel`),
 
   // Participant
   getParticipant: (id, pid) => req(`/meetings/${id}/participant/${pid}`),

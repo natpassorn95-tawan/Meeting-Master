@@ -8,6 +8,7 @@ import {
   buildRegistrationMessage,
   buildMyMeetingsMessage,
   buildCheckinMessage,
+  buildCancelMessage,
   getBotInfo,
   getQuota,
   broadcast,
@@ -212,6 +213,24 @@ app.post("/api/meetings/:id/remind-unread", async (req, res) => {
     }
   }
   res.json({ ok: true, unread: unread.map((r) => ({ name: r.name, dept: r.dept })), pushed });
+});
+
+// Cancel a meeting: notify every attendee (with a real LINE userId) that it is
+// cancelled, then move it to the trash (recoverable from the Deleted folder).
+app.post("/api/meetings/:id/cancel", async (req, res) => {
+  const m = db.getMeeting(req.params.id);
+  if (!m) return res.status(404).json({ error: "meeting not found" });
+  let pushed = 0, recipients = 0;
+  if (LINE_CONFIGURED) {
+    const msg = [buildCancelMessage(m)];
+    for (const p of m.roster) {
+      if (!/^U[0-9a-f]{32}$/.test(p.lineUserId || "")) continue;
+      recipients++;
+      try { await pushTo(p.lineUserId, msg); pushed++; } catch { /* keep going */ }
+    }
+  }
+  db.trashMeeting(m.id);
+  res.json({ ok: true, pushed, recipients });
 });
 
 // ── Participant responses (the "Receive" + agenda-preview surface) ─────

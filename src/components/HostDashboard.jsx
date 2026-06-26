@@ -11,6 +11,7 @@ export default function HostDashboard({ meetingId, go }) {
   const [remindResult, setRemindResult] = useState(null);
   const [sendingCk, setSendingCk] = useState(false);
   const [ckResult, setCkResult] = useState(null);
+  const [cancelling, setCancelling] = useState(false);
 
   const load = useCallback(async () => {
     try { setData(await api.getResponses(meetingId)); }
@@ -53,6 +54,17 @@ export default function HostDashboard({ meetingId, go }) {
     try { setCkResult(await api.sendCheckin(meetingId)); }
     catch (e) { setError(e.message); }
     finally { setSendingCk(false); load(); }
+  }
+
+  // Cancel the meeting: notify attendees on LINE, then it moves to the trash.
+  async function cancelMeeting() {
+    if (!confirm(t("host.cancelConfirm", { title: meeting.title }))) return;
+    setCancelling(true); setError("");
+    try {
+      const r = await api.cancelMeeting(meetingId);
+      alert(t("host.cancelDone", { pushed: r.pushed, total: r.recipients }));
+      go("host", {}); // back to the calendar; meeting is now in the Deleted folder
+    } catch (e) { setError(e.message); setCancelling(false); }
   }
 
   // Download the attendee responses as a CSV (UTF-8 BOM → opens in Excel).
@@ -98,7 +110,12 @@ export default function HostDashboard({ meetingId, go }) {
             <p style={{ margin: "0 0 2px", fontSize: 13, color: "var(--color-text-secondary)" }}>{meeting.datetime}・{meeting.location}・{t("label.host")}：{meeting.host}</p>
             <h2 style={{ margin: 0, fontSize: 20, fontWeight: 500 }}>{meeting.title}</h2>
           </div>
-          <button onClick={() => go("host", { m: meetingId })} style={{ ...btn(false), height: 34, fontSize: 13 }}>{t("host.backToCalendar")}</button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={() => go("host", { m: meetingId })} style={{ ...btn(false), height: 34, fontSize: 13 }}>{t("host.backToCalendar")}</button>
+            <button onClick={cancelMeeting} disabled={cancelling} style={{ height: 34, fontSize: 13, fontWeight: 500, padding: "0 14px", borderRadius: 8, cursor: cancelling ? "default" : "pointer", border: "none", background: RED, color: "#fff", opacity: cancelling ? 0.6 : 1 }}>
+              {cancelling ? t("host.cancelling") : t("host.cancelMeeting")}
+            </button>
+          </div>
         </div>
         <div style={{ display: "flex", marginTop: 16, paddingTop: 16, borderTop: "0.5px solid rgba(0,0,0,.1)" }}>
           {stat(confirmed, t("host.confirmed"), GREEN)}
