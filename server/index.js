@@ -507,6 +507,10 @@ app.get("/api/schedules", (_req, res) => res.json(db.listSchedules()));
 
 app.post("/api/schedules", (req, res) => {
   if (!String(req.body?.title || "").trim()) return res.status(400).json({ error: "title is required" });
+  const { startTime, endTime } = req.body || {};
+  if (endTime && startTime && startTime >= endTime) {
+    return res.status(400).json({ error: "start time must be before end time" });
+  }
   res.status(201).json(db.decorateSchedule(db.createSchedule(req.body), Date.now()));
 });
 

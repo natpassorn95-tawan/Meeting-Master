@@ -34,7 +34,7 @@ export const api = {
   uploadFile: (payload) => post("/uploads", payload), // { name, type, dataUrl }
 
   // My Meetings (participant manages attendance across occurrences)
-  myMeetings: (name) => req(`/my-meetings?name=${encodeURIComponent(name)}`),
+  myMeetings: (name, from, to) => req(`/my-meetings?name=${encodeURIComponent(name)}${from ? `&from=${from}` : ""}${to ? `&to=${to}` : ""}`),
   mySummary: (name, month) => req(`/my-meetings/summary?name=${encodeURIComponent(name)}&month=${month}`),
   myMeetingsRsvp: (payload) => post("/my-meetings/rsvp", payload),
   getResponses: (id) => req(`/meetings/${id}/responses`),

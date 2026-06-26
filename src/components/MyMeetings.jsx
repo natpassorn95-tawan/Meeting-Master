@@ -32,12 +32,15 @@ export default function MyMeetings({ userId }) {
   const [busyKey, setBusyKey] = useState("");
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [summary, setSummary] = useState(null);
+  const [filterDate, setFilterDate] = useState(""); // "" = all upcoming
 
   const load = useCallback(async () => {
     if (!name) return;
-    try { const d = await api.myMeetings(name); setItems(d.items); }
-    catch (e) { setError(e.message); }
-  }, [name]);
+    try {
+      const d = filterDate ? await api.myMeetings(name, filterDate, filterDate) : await api.myMeetings(name);
+      setItems(d.items);
+    } catch (e) { setError(e.message); }
+  }, [name, filterDate]);
   useEffect(() => { load(); }, [load]);
 
   // Monthly performance for the selected month.
@@ -87,6 +90,13 @@ export default function MyMeetings({ userId }) {
           <span style={{ marginLeft: 8 }}>· {name}</span>
           <button onClick={() => { try { localStorage.removeItem(NAME_KEY); } catch { /* ignore */ } setName(""); setItems(null); }} style={{ marginLeft: 8, fontSize: 12, border: "none", background: "transparent", color: ACCENT, cursor: "pointer" }}>{t("invite.switchId")}</button>
         </p>
+      </div>
+
+      {/* Date filter */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>{t("mymeetings.filter")}</span>
+        <button onClick={() => setFilterDate("")} style={{ height: 32, padding: "0 14px", fontSize: 13, borderRadius: 999, cursor: "pointer", border: filterDate ? "0.5px solid rgba(0,0,0,.25)" : "none", background: filterDate ? "transparent" : ACCENT, color: filterDate ? "var(--color-text-primary)" : "#fff" }}>{t("mymeetings.all")}</button>
+        <input type="date" value={filterDate} onChange={(e) => setFilterDate(e.target.value)} style={{ ...input, width: "auto", height: 32, appearance: "auto" }} />
       </div>
 
       {error ? <div style={{ ...card, marginBottom: 12, borderColor: RED, color: RED, fontSize: 14 }}>⚠ {error}</div> : null}

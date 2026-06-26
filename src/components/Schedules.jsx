@@ -24,6 +24,7 @@ export default function Schedules({ go }) {
   const [error, setError] = useState("");
   const [runResult, setRunResult] = useState(null);
   const [busyId, setBusyId] = useState(null);
+  const [showPassed, setShowPassed] = useState(false);
 
   const load = useCallback(async () => {
     try { setSchedules(await api.listSchedules()); }
@@ -67,44 +68,65 @@ export default function Schedules({ go }) {
         </div>
       ) : null}
 
-      {schedules === null ? <p style={{ color: "var(--color-text-secondary)" }}>{t("common.loading")}</p> : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {schedules.length === 0 ? <p style={{ color: "var(--color-text-tertiary,#999)" }}>{t("sched.none")}</p> : null}
-          {schedules.map((s) => (
-            <div key={s.id} style={card}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <h3 style={{ margin: 0, fontSize: 17, fontWeight: 500 }}>{s.title}</h3>
-                    {s.enabled ? <span style={pill("#E1F5EE", GREEN)}>{t("sched.enabled")}</span> : <span style={pill("rgba(0,0,0,.06)", "#888")}>{t("sched.disabled")}</span>}
-                  </div>
-                  <p style={{ margin: "6px 0 0", fontSize: 13, color: "var(--color-text-secondary)" }}>
-                    🔁 {recurrenceTextI18n(s, lang)}　📍 {s.location || "—"}　👤 {s.host || "—"}
-                  </p>
-                  {(s.startDate || s.endDate) ? (
-                    <p style={{ margin: "4px 0 0", fontSize: 13, color: "var(--color-text-secondary)" }}>📆 {s.startDate || "…"} – {s.endDate || "…"}</p>
-                  ) : null}
-                  <p style={{ margin: "4px 0 0", fontSize: 13, color: "var(--color-text-secondary)" }}>
-                    👥 {t("sched.recipients", { n: s.recipientIds?.length || s.roster.length })}　⏰ {t("sched.lead", { lead: (s.leads || []).map((l) => t(`lead.${l}`)).join(lang === "en" ? ", " : "、") })}
-                  </p>
+      {schedules === null ? <p style={{ color: "var(--color-text-secondary)" }}>{t("common.loading")}</p> : (() => {
+        const active = schedules.filter((s) => s.nextOccurrenceAt != null);
+        const passed = schedules.filter((s) => s.nextOccurrenceAt == null);
+        const renderCard = (s, isPassed) => (
+          <div key={s.id} style={{ ...card, ...(isPassed ? { opacity: 0.85 } : {}) }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <h3 style={{ margin: 0, fontSize: 17, fontWeight: 500 }}>{s.title}</h3>
+                  {isPassed ? <span style={pill("rgba(0,0,0,.06)", "#888")}>{t("sched.passedTag")}</span>
+                    : s.enabled ? <span style={pill("#E1F5EE", GREEN)}>{t("sched.enabled")}</span>
+                    : <span style={pill("rgba(0,0,0,.06)", "#888")}>{t("sched.disabled")}</span>}
+                </div>
+                <p style={{ margin: "6px 0 0", fontSize: 13, color: "var(--color-text-secondary)" }}>
+                  🔁 {recurrenceTextI18n(s, lang)}　📍 {s.location || "—"}　👤 {s.host || "—"}
+                </p>
+                {(s.startDate || s.endDate) ? (
+                  <p style={{ margin: "4px 0 0", fontSize: 13, color: "var(--color-text-secondary)" }}>📆 {s.startDate || "…"} – {s.endDate || "…"}</p>
+                ) : null}
+                <p style={{ margin: "4px 0 0", fontSize: 13, color: "var(--color-text-secondary)" }}>
+                  👥 {t("sched.recipients", { n: s.recipientIds?.length || s.roster.length })}　⏰ {t("sched.lead", { lead: (s.leads || []).map((l) => t(`lead.${l}`)).join(lang === "en" ? ", " : "、") })}
+                </p>
+                {!isPassed ? (
                   <p style={{ margin: "4px 0 0", fontSize: 13, color: ACCENT }}>
                     {t("sched.nextMeeting")}：{occText(s, lang)}　|　{t("sched.scheduledSend")}：{fmtTs(s.nextSendAt, lang)}
                   </p>
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
+                ) : null}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
+                {!isPassed ? (
                   <button onClick={() => runNow(s.id)} disabled={busyId === s.id} style={{ ...btn(true), height: 34, fontSize: 13 }}>
                     {busyId === s.id ? t("sched.sending") : t("sched.runNow")}
                   </button>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button onClick={() => toggle(s)} style={{ ...btn(false), height: 30, fontSize: 12 }}>{s.enabled ? t("sched.disable") : t("sched.enable")}</button>
-                    <button onClick={() => remove(s.id)} style={{ ...btn(false), height: 30, fontSize: 12, color: RED, borderColor: RED + "55" }}>{t("common.delete")}</button>
-                  </div>
+                ) : null}
+                <div style={{ display: "flex", gap: 6 }}>
+                  {!isPassed ? <button onClick={() => toggle(s)} style={{ ...btn(false), height: 30, fontSize: 12 }}>{s.enabled ? t("sched.disable") : t("sched.enable")}</button> : null}
+                  <button onClick={() => remove(s.id)} style={{ ...btn(false), height: 30, fontSize: 12, color: RED, borderColor: RED + "55" }}>{t("common.delete")}</button>
                 </div>
               </div>
             </div>
-          ))}
-        </div>
-      )}
+          </div>
+        );
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {schedules.length === 0 ? <p style={{ color: "var(--color-text-tertiary,#999)" }}>{t("sched.none")}</p> : null}
+            {active.map((s) => renderCard(s, false))}
+
+            {passed.length ? (
+              <div style={card}>
+                <button onClick={() => setShowPassed((v) => !v)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", border: "none", background: "transparent", cursor: "pointer", fontSize: 15, fontWeight: 500, color: "var(--color-text-primary)", padding: 0 }}>
+                  <span>📁 {t("sched.passed")} ({passed.length})</span>
+                  <span style={{ color: "var(--color-text-tertiary,#999)" }}>{showPassed ? "▲" : "▼"}</span>
+                </button>
+                {showPassed ? <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 12 }}>{passed.map((s) => renderCard(s, true))}</div> : null}
+              </div>
+            ) : null}
+          </div>
+        );
+      })()}
 
       <CreateForm pool={pool} onCreated={() => { setRunResult(null); load(); }} setError={setError} />
     </div>
@@ -152,6 +174,7 @@ function CreateForm({ pool, onCreated, setError }) {
   async function create() {
     if (!f.title.trim()) { setError(t("sched.errTitle")); return; }
     if (f.freq === "once" && !f.date) { setError(t("sched.errDate")); return; }
+    if (f.endTime && f.startTime >= f.endTime) { setError(t("sched.errTime")); return; } // start must be before end
     setSaving(true); setError("");
     try {
       await api.createSchedule({
@@ -230,6 +253,9 @@ function CreateForm({ pool, onCreated, setError }) {
         <span style={{ color: "var(--color-text-tertiary,#999)" }}>–</span>
         <input type="time" style={{ ...selStyle, flex: 1 }} value={f.endTime} onChange={set("endTime")} />
       </div>
+      {f.endTime && f.startTime >= f.endTime ? (
+        <p style={{ margin: "6px 0 0", fontSize: 12, color: RED }}>⚠ {t("sched.errTime")}</p>
+      ) : null}
 
       <div style={{ height: 14 }} />
       <label style={label}>{t("sched.timing")}</label>
@@ -282,7 +308,9 @@ function CreateForm({ pool, onCreated, setError }) {
 
       <div style={{ height: 18 }} />
       <div style={{ display: "flex", gap: 8 }}>
-        <button onClick={create} disabled={saving} style={{ ...btn(true), flex: 1, opacity: saving ? 0.5 : 1 }}>{saving ? t("sched.creating") : t("sched.create")}</button>
+        {(() => { const badTime = !!f.endTime && f.startTime >= f.endTime; return (
+          <button onClick={create} disabled={saving || badTime} style={{ ...btn(true), flex: 1, opacity: saving || badTime ? 0.5 : 1 }}>{saving ? t("sched.creating") : t("sched.create")}</button>
+        ); })()}
         <button onClick={() => setOpen(false)} style={{ ...btn(false), flex: "0 0 100px" }}>{t("common.cancel")}</button>
       </div>
     </div>
