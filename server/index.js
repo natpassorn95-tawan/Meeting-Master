@@ -102,6 +102,28 @@ app.post("/api/meetings", (req, res) => {
   res.status(201).json(db.createMeeting(req.body));
 });
 
+// ── Trash (Host "Deleted meetings" folder) ──────────────────────────────
+// Registered before "/:id" so "deleted" isn't matched as a meeting id.
+app.get("/api/meetings/deleted", (_req, res) => res.json(db.listDeleted()));
+
+app.post("/api/meetings/:id/trash", (req, res) => {
+  const m = db.trashMeeting(req.params.id);
+  if (!m) return res.status(404).json({ error: "meeting not found" });
+  res.json(m);
+});
+
+app.post("/api/meetings/:id/restore", (req, res) => {
+  const m = db.restoreMeeting(req.params.id);
+  if (!m) return res.status(404).json({ error: "not in trash" });
+  res.json(m);
+});
+
+// Permanent delete (purge from trash).
+app.delete("/api/meetings/:id", (req, res) => {
+  if (!db.purgeMeeting(req.params.id)) return res.status(404).json({ error: "not in trash" });
+  res.status(204).end();
+});
+
 app.get("/api/meetings/:id", (req, res) => {
   const m = db.getMeeting(req.params.id);
   if (!m) return res.status(404).json({ error: "meeting not found" });
@@ -476,7 +498,9 @@ app.get("/api/calendar", (req, res) => {
     if (!s.enabled) continue;
     for (const occ of db.occurrencesInRange(s, fromMs, toMs)) {
       const occKey = db.ymd(occ);
-      if (db.getMeeting(`${s.id}__${occKey}`)) continue; // already materialised → shown as a meeting
+      const occId = `${s.id}__${occKey}`;
+      if (db.getMeeting(occId)) continue; // already materialised → shown as a meeting
+      if (db.isTrashed(occId)) continue;  // deleted by the host → stays in the trash, don't re-project
       events.push({ type: "scheduled", scheduleId: s.id, occKey, date: occKey, title: s.title, startTime: s.startTime, endTime: s.endTime, location: s.location, count: s.recipientIds?.length || s.roster.length });
     }
   }

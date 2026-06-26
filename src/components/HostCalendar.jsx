@@ -1,39 +1,53 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { api } from "../api.js";
-import { ACCENT, GREEN, RED, AMBER, card, btn, pill } from "../ui.js";
+import { ACCENT, GREEN, RED, AMBER, BROWN, card, btn, pill } from "../ui.js";
 import { useT, fmtDateTimeI18n } from "../i18n.jsx";
 
 const WD = { zh: ["日", "一", "二", "三", "四", "五", "六"], en: ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"] };
 const ymd = (y, m, d) => `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 
 // Host page: month calendar of meetings — both created instances and projected
-// upcoming occurrences of recurring schedules. Clicking one opens its Host
-// dashboard (materialising a scheduled occurrence on demand).
+// upcoming occurrences of recurring schedules. Day colour shows time, not type:
+// brown = a passed day, purple = current/upcoming. Below the calendar sit two
+// folders: the full meeting list (grouped upcoming/passed) and a Deleted folder
+// (soft-deleted meetings that can be restored). Clicking a meeting opens its
+// Host dashboard (materialising a scheduled occurrence on demand).
 export default function HostCalendar({ go }) {
   const { t, lang } = useT();
   const [events, setEvents] = useState(null);
+  const [deleted, setDeleted] = useState([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showMeetings, setShowMeetings] = useState(false);
+  const [showDeleted, setShowDeleted] = useState(false);
   const today = new Date();
   const todayStr = ymd(today.getFullYear(), today.getMonth(), today.getDate());
   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [selected, setSelected] = useState(todayStr);
 
-  useEffect(() => {
+  const load = useCallback(async () => {
     // Fetch a wide window once: last month → +12 months.
     const from = ymd(today.getFullYear(), today.getMonth() - 1, 1);
     const to = ymd(today.getFullYear() + 1, today.getMonth(), 28);
-    api.getCalendar(from, to)
-      .then((evs) => {
-        setEvents(evs);
-        const upcoming = evs.map((e) => e.date).filter((d) => d >= todayStr).sort()[0] || evs.map((e) => e.date).sort().pop();
-        if (upcoming) {
-          const [y, mo] = upcoming.split("-").map(Number);
-          setCur({ y, m: mo - 1 });
-          setSelected(upcoming);
-        }
-      })
-      .catch((e) => setError(e.message));
+    try {
+      const [evs, del] = await Promise.all([api.getCalendar(from, to), api.listDeletedMeetings().catch(() => [])]);
+      setEvents(evs);
+      setDeleted(del);
+      return evs;
+    } catch (e) { setError(e.message); return null; }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    load().then((evs) => {
+      if (!evs || !evs.length) return;
+      const upcoming = evs.map((e) => e.date).filter((d) => d >= todayStr).sort()[0] || evs.map((e) => e.date).sort().pop();
+      if (upcoming) {
+        const [y, mo] = upcoming.split("-").map(Number);
+        setCur({ y, m: mo - 1 });
+        setSelected(upcoming);
+      }
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -44,6 +58,13 @@ export default function HostCalendar({ go }) {
       const m = await api.materialize(ev.scheduleId, ev.occKey);
       go("host", { m: m.id, board: "1" });
     } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  }
+
+  async function act(fn) {
+    setBusy(true); setError("");
+    try { await fn(); await load(); }
+    catch (e) { setError(e.message); }
     finally { setBusy(false); }
   }
 
@@ -64,6 +85,10 @@ export default function HostCalendar({ go }) {
 
   const dayEvents = byDate[selected] || [];
 
+  // Meeting list folder: split every event into upcoming vs passed by date.
+  const upcoming = events.filter((e) => e.date >= todayStr).sort((a, b) => a.date.localeCompare(b.date));
+  const passed = events.filter((e) => e.date < todayStr).sort((a, b) => b.date.localeCompare(a.date));
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={card}>
@@ -71,10 +96,10 @@ export default function HostCalendar({ go }) {
         <p style={{ margin: 0, fontSize: 14, color: "var(--color-text-secondary)" }}>{t("hostcal.desc")}</p>
         <p style={{ margin: "10px 0 0", fontSize: 12, color: "var(--color-text-secondary)", display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-            <span style={{ width: 14, height: 14, borderRadius: 4, background: ACCENT + "26", border: `1px solid ${ACCENT}` }} /> {t("hostcal.legendMeeting")}
+            <span style={{ width: 14, height: 14, borderRadius: 4, background: ACCENT + "26", border: `1px solid ${ACCENT}` }} /> {t("hostcal.legendUpcoming")}
           </span>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-            <span style={{ width: 14, height: 14, borderRadius: 4, background: AMBER + "26", border: `1px solid ${AMBER}` }} /> {t("hostcal.legendScheduled")}
+            <span style={{ width: 14, height: 14, borderRadius: 4, background: BROWN + "26", border: `1px solid ${BROWN}` }} /> {t("hostcal.legendPassed")}
           </span>
         </p>
       </div>
@@ -99,9 +124,8 @@ export default function HostCalendar({ go }) {
             if (d === null) return <div key={i} />;
             const ds = ymd(cur.y, cur.m, d);
             const evs = byDate[ds] || [];
-            const created = evs.filter((e) => e.type === "meeting").length;
             const has = evs.length > 0;
-            const tone = created ? ACCENT : AMBER; // created (purple) dominates a mixed day
+            const tone = ds < todayStr ? BROWN : ACCENT; // passed (brown) vs current/upcoming (purple)
             const isSel = ds === selected;
             const isToday = ds === todayStr;
             return (
@@ -119,11 +143,12 @@ export default function HostCalendar({ go }) {
               >
                 <span style={{ fontSize: 14 }}>{d}</span>
                 {evs.length > 1 ? (
-                  <span style={{ display: "flex", gap: 2, marginTop: 1, height: 4 }}>
-                    {evs.slice(0, 5).map((e, k) => (
-                      <span key={k} style={{ width: 4, height: 4, borderRadius: "50%", background: isSel ? "#fff" : (e.type === "meeting" ? ACCENT : AMBER) }} />
-                    ))}
-                  </span>
+                  <span style={{
+                    fontSize: 10, lineHeight: 1, fontWeight: 700, marginTop: 1,
+                    padding: "1px 5px", borderRadius: 999,
+                    background: isSel ? "rgba(255,255,255,.3)" : tone,
+                    color: isSel ? "#fff" : "#fff",
+                  }}>{evs.length}</span>
                 ) : null}
               </button>
             );
@@ -137,25 +162,102 @@ export default function HostCalendar({ go }) {
           <p style={{ margin: 0, fontSize: 14, color: "var(--color-text-tertiary,#999)" }}>{events.length ? t("attendee.noMeetingsDay") : t("attendee.selectDay")}</p>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {dayEvents.map((ev, idx) => (
-              <button key={idx} onClick={() => open(ev)} disabled={busy} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 12px", border: "0.5px solid rgba(0,0,0,.12)", borderRadius: 10, flexWrap: "wrap", background: "#fff", cursor: "pointer", textAlign: "left", width: "100%" }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                    <p style={{ margin: 0, fontSize: 15, fontWeight: 500 }}>{ev.title || "（未命名會議）"}</p>
-                    {ev.type === "scheduled"
-                      ? <span style={pill("#FFF6E5", AMBER)}>{t("hostcal.tagScheduled")}</span>
-                      : <span style={pill("#E1F5EE", GREEN)}>{t("hostcal.tagCreated")}</span>}
-                  </div>
-                  <p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--color-text-secondary)" }}>
-                    {fmtDateTimeI18n(ev.date, ev.startTime, ev.endTime, lang)}{ev.location ? `・${ev.location}` : ""}
-                    {"  "}<span style={{ ...pill("#EDEBF7", ACCENT), marginLeft: 6 }}>{ev.count} 人</span>
-                  </p>
-                </div>
-                <span style={{ ...btn(true), height: 32, fontSize: 12, display: "inline-flex", alignItems: "center" }}>{t("hostcal.open")}</span>
-              </button>
-            ))}
+            {dayEvents.map((ev, idx) => <EventRow key={idx} ev={ev} t={t} lang={lang} busy={busy} onOpen={open} />)}
           </div>
         )}
+      </div>
+
+      {/* Folder: full meeting list, grouped upcoming + passed */}
+      <div style={card}>
+        <FolderHeader icon="🗂" label={`${t("hostcal.meetingsFolder")} (${events.length})`} open={showMeetings} onToggle={() => setShowMeetings((v) => !v)} />
+        {showMeetings ? (
+          events.length === 0 ? (
+            <p style={{ margin: "12px 0 0", fontSize: 14, color: "var(--color-text-tertiary,#999)" }}>{t("hostcal.none")}</p>
+          ) : (
+            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 14 }}>
+              <Section title={`${t("hostcal.upcomingGroup")} (${upcoming.length})`}>
+                {upcoming.length ? upcoming.map((ev, i) => <EventRow key={i} ev={ev} t={t} lang={lang} busy={busy} onOpen={open} onTrash={ev.type === "meeting" ? () => act(() => api.trashMeeting(ev.id)) : null} />)
+                  : <Empty t={t} />}
+              </Section>
+              <Section title={`${t("hostcal.passedGroup")} (${passed.length})`}>
+                {passed.length ? passed.map((ev, i) => <EventRow key={i} ev={ev} t={t} lang={lang} busy={busy} onOpen={open} onTrash={ev.type === "meeting" ? () => act(() => api.trashMeeting(ev.id)) : null} />)
+                  : <Empty t={t} />}
+              </Section>
+            </div>
+          )
+        ) : null}
+      </div>
+
+      {/* Folder: deleted meetings (restore / permanent delete) */}
+      <div style={card}>
+        <FolderHeader icon="🗑" label={`${t("hostcal.deletedFolder")} (${deleted.length})`} open={showDeleted} onToggle={() => setShowDeleted((v) => !v)} />
+        {showDeleted ? (
+          deleted.length === 0 ? (
+            <p style={{ margin: "12px 0 0", fontSize: 14, color: "var(--color-text-tertiary,#999)" }}>{t("hostcal.emptyDeleted")}</p>
+          ) : (
+            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+              {deleted.map((m) => (
+                <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 12px", border: "0.5px solid rgba(0,0,0,.12)", borderRadius: 10, flexWrap: "wrap" }}>
+                  <div style={{ minWidth: 0 }}>
+                    <p style={{ margin: 0, fontSize: 15, fontWeight: 500, color: "var(--color-text-secondary)" }}>{m.title || "（未命名會議）"}</p>
+                    <p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--color-text-tertiary,#999)" }}>
+                      {fmtDateTimeI18n(m.date, m.startTime, m.endTime, lang)}{m.location ? `・${m.location}` : ""}
+                    </p>
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button onClick={() => act(() => api.restoreMeeting(m.id))} disabled={busy} style={{ ...btn(false), height: 30, fontSize: 12, color: GREEN, borderColor: GREEN + "55" }}>↩ {t("hostcal.restore")}</button>
+                    <button onClick={() => { if (confirm(t("hostcal.purgeConfirm"))) act(() => api.purgeMeeting(m.id)); }} disabled={busy} style={{ ...btn(false), height: 30, fontSize: 12, color: RED, borderColor: RED + "55" }}>{t("hostcal.purge")}</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function FolderHeader({ icon, label, open, onToggle }) {
+  return (
+    <button onClick={onToggle} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", border: "none", background: "transparent", cursor: "pointer", fontSize: 15, fontWeight: 500, color: "var(--color-text-primary)", padding: 0 }}>
+      <span>{icon} {label}</span>
+      <span style={{ color: "var(--color-text-tertiary,#999)" }}>{open ? "▲" : "▼"}</span>
+    </button>
+  );
+}
+
+function Section({ title, children }) {
+  return (
+    <div>
+      <p style={{ margin: "0 0 8px", fontSize: 12, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase", color: "var(--color-text-tertiary,#999)" }}>{title}</p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>{children}</div>
+    </div>
+  );
+}
+
+function Empty({ t }) {
+  return <p style={{ margin: 0, fontSize: 13, color: "var(--color-text-tertiary,#999)" }}>{t("hostcal.none")}</p>;
+}
+
+function EventRow({ ev, t, lang, busy, onOpen, onTrash }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 12px", border: "0.5px solid rgba(0,0,0,.12)", borderRadius: 10, flexWrap: "wrap", background: "#fff" }}>
+      <button onClick={() => onOpen(ev)} disabled={busy} style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2, background: "transparent", border: "none", cursor: "pointer", textAlign: "left", padding: 0 }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 15, fontWeight: 500 }}>{ev.title || "（未命名會議）"}</span>
+          {ev.type === "scheduled"
+            ? <span style={pill("#FFF6E5", AMBER)}>{t("hostcal.tagScheduled")}</span>
+            : <span style={pill("#E1F5EE", GREEN)}>{t("hostcal.tagCreated")}</span>}
+        </span>
+        <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>
+          {fmtDateTimeI18n(ev.date, ev.startTime, ev.endTime, lang)}{ev.location ? `・${ev.location}` : ""}
+          {"  "}<span style={{ ...pill("#EDEBF7", ACCENT), marginLeft: 6 }}>{ev.count} 人</span>
+        </span>
+      </button>
+      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        {onTrash ? <button onClick={onTrash} disabled={busy} title={t("hostcal.trash")} style={{ ...btn(false), height: 32, width: 36, fontSize: 14, padding: 0, color: RED, borderColor: RED + "55" }}>🗑</button> : null}
+        <span onClick={() => !busy && onOpen(ev)} style={{ ...btn(true), height: 32, fontSize: 12, display: "inline-flex", alignItems: "center", cursor: busy ? "default" : "pointer" }}>{t("hostcal.open")}</span>
       </div>
     </div>
   );

@@ -5,6 +5,7 @@ export const ACCENT = "#534AB7";
 export const GREEN = "#0F6E56";
 export const RED = "#993556";
 export const AMBER = "#854F0B";
+export const BROWN = "#8A5A2B"; // passed meetings on the Host calendar
 
 export const card = {
   background: "var(--color-background-primary, #fff)",

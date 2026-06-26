@@ -26,7 +26,7 @@ function fmtDatetime(date, start, end) {
   return time ? `${dateStr} ${time}` : dateStr;
 }
 
-const store = { meetings: {}, order: [], schedules: {}, scheduleOrder: [], members: {}, standing: {} };
+const store = { meetings: {}, order: [], schedules: {}, scheduleOrder: [], members: {}, standing: {}, deleted: {} };
 
 // ── Persistence (data/store.json) ──────────────────────────────────────
 const DATA_FILE = fileURLToPath(new URL("../data/store.json", import.meta.url));
@@ -38,7 +38,7 @@ function saveStore() {
     fs.writeFileSync(DATA_FILE, JSON.stringify({
       meetings: store.meetings, order: store.order,
       schedules: store.schedules, scheduleOrder: store.scheduleOrder,
-      members: store.members, standing: store.standing, seq,
+      members: store.members, standing: store.standing, deleted: store.deleted, seq,
     }));
   } catch (e) { console.error("[store] save failed", e.message); }
 }
@@ -57,6 +57,7 @@ function loadStore() {
     store.scheduleOrder = d.scheduleOrder || [];
     store.members = d.members || {};
     store.standing = d.standing || {};
+    store.deleted = d.deleted || {};
     if (typeof d.seq === "number") seq = d.seq;
     console.log(`[store] loaded ${store.order.length} meetings, ${store.scheduleOrder.length} schedules, ${Object.keys(store.members).length} members`);
   } catch (e) { console.error("[store] load failed (starting fresh)", e.message); }
@@ -173,6 +174,7 @@ function createMeeting(input) {
   };
   store.meetings[id] = meeting;
   if (!store.order.includes(id)) store.order.unshift(id);
+  delete store.deleted[id]; // recreating a trashed id supersedes the trash copy
   return meeting;
 }
 
@@ -482,18 +484,50 @@ function updateSchedule(id, patch) {
 function deleteSchedule(id) {
   delete store.schedules[id];
   store.scheduleOrder = store.scheduleOrder.filter((x) => x !== id);
-  // Cascade: drop every materialised occurrence of this schedule so it also
-  // disappears from the Host calendar, plus its standing-attendance record.
+  // Cascade: move every materialised occurrence of this schedule to the trash
+  // so it leaves the Host calendar but can still be restored. Drop standing too.
   let removed = 0;
   for (const mid of Object.keys(store.meetings)) {
-    if (scheduleIdOf(mid) === id) { delete store.meetings[mid]; removed++; }
+    if (scheduleIdOf(mid) === id) { trashMeeting(mid); removed++; }
   }
-  store.order = store.order.filter((x) => scheduleIdOf(x) !== id);
   delete store.standing[id];
   return removed;
 }
 
-export { ymd, nextOccurrence, occurrencesInRange, recurrenceSummary, decorateSchedule, createSchedule, listSchedules, getSchedule, updateSchedule, deleteSchedule };
+// ── Soft delete (trash) ────────────────────────────────────────────────
+// Trashed meetings move out of meetings/order into store.deleted (keyed by id)
+// with a deletedAt stamp, so the Host "Deleted" folder can list/restore them.
+function trashMeeting(id) {
+  const m = store.meetings[id];
+  if (!m) return null;
+  m.deletedAt = Date.now();
+  store.deleted[id] = m;
+  delete store.meetings[id];
+  store.order = store.order.filter((x) => x !== id);
+  return m;
+}
+function restoreMeeting(id) {
+  const m = store.deleted[id];
+  if (!m) return null;
+  delete m.deletedAt;
+  store.meetings[id] = m;
+  if (!store.order.includes(id)) store.order.unshift(id);
+  delete store.deleted[id];
+  return m;
+}
+function purgeMeeting(id) {
+  if (!store.deleted[id]) return false;
+  delete store.deleted[id];
+  return true;
+}
+function listDeleted() {
+  return Object.values(store.deleted).sort((a, b) => (b.deletedAt || 0) - (a.deletedAt || 0));
+}
+function isTrashed(id) {
+  return !!store.deleted[id];
+}
+
+export { ymd, nextOccurrence, occurrencesInRange, recurrenceSummary, decorateSchedule, createSchedule, listSchedules, getSchedule, updateSchedule, deleteSchedule, trashMeeting, restoreMeeting, purgeMeeting, listDeleted, isTrashed };
 
 // A participant's meetings (by name). One row per schedule = the NEAREST
 // upcoming occurrence (weekly/monthly collapse to a single row); one-time

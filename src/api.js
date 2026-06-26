@@ -26,6 +26,10 @@ export const api = {
   // Meetings
   listMeetings: () => req("/meetings"),
   getMeeting: (id) => req(`/meetings/${id}`),
+  listDeletedMeetings: () => req("/meetings/deleted"),
+  trashMeeting: (id) => post(`/meetings/${id}/trash`),
+  restoreMeeting: (id) => post(`/meetings/${id}/restore`),
+  purgeMeeting: (id) => del(`/meetings/${id}`),
   createMeeting: (m) => post("/meetings", m),
   updateMeta: (id, patchBody) => patch(`/meetings/${id}/meta`, patchBody),
   setTopics: (id, topics) => put(`/meetings/${id}/topics`, { topics }),
