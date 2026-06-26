@@ -18,7 +18,6 @@ export default function HostCalendar({ go }) {
   const [deleted, setDeleted] = useState([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [showMeetings, setShowMeetings] = useState(false);
   const [showDeleted, setShowDeleted] = useState(false);
   const today = new Date();
   const todayStr = ymd(today.getFullYear(), today.getMonth(), today.getDate());
@@ -84,10 +83,6 @@ export default function HostCalendar({ go }) {
   const shift = (delta) => { const d = new Date(cur.y, cur.m + delta, 1); setCur({ y: d.getFullYear(), m: d.getMonth() }); };
 
   const dayEvents = byDate[selected] || [];
-
-  // Meeting list folder: split every event into upcoming vs passed by date.
-  const upcoming = events.filter((e) => e.date >= todayStr).sort((a, b) => a.date.localeCompare(b.date));
-  const passed = events.filter((e) => e.date < todayStr).sort((a, b) => b.date.localeCompare(a.date));
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -167,27 +162,6 @@ export default function HostCalendar({ go }) {
         )}
       </div>
 
-      {/* Folder: full meeting list, grouped upcoming + passed */}
-      <div style={card}>
-        <FolderHeader icon="🗂" label={`${t("hostcal.meetingsFolder")} (${events.length})`} open={showMeetings} onToggle={() => setShowMeetings((v) => !v)} />
-        {showMeetings ? (
-          events.length === 0 ? (
-            <p style={{ margin: "12px 0 0", fontSize: 14, color: "var(--color-text-tertiary,#999)" }}>{t("hostcal.none")}</p>
-          ) : (
-            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 14 }}>
-              <Section title={`${t("hostcal.upcomingGroup")} (${upcoming.length})`}>
-                {upcoming.length ? upcoming.map((ev, i) => <EventRow key={i} ev={ev} past={false} t={t} lang={lang} busy={busy} onOpen={open} onTrash={ev.type === "meeting" ? () => act(() => api.trashMeeting(ev.id)) : null} />)
-                  : <Empty t={t} />}
-              </Section>
-              <Section title={`${t("hostcal.passedGroup")} (${passed.length})`}>
-                {passed.length ? passed.map((ev, i) => <EventRow key={i} ev={ev} past={true} t={t} lang={lang} busy={busy} onOpen={open} onTrash={ev.type === "meeting" ? () => act(() => api.trashMeeting(ev.id)) : null} />)
-                  : <Empty t={t} />}
-              </Section>
-            </div>
-          )
-        ) : null}
-      </div>
-
       {/* Folder: deleted meetings (restore / permanent delete) */}
       <div style={card}>
         <FolderHeader icon="🗑" label={`${t("hostcal.deletedFolder")} (${deleted.length})`} open={showDeleted} onToggle={() => setShowDeleted((v) => !v)} />
@@ -225,19 +199,6 @@ function FolderHeader({ icon, label, open, onToggle }) {
       <span style={{ color: "var(--color-text-tertiary,#999)" }}>{open ? "▲" : "▼"}</span>
     </button>
   );
-}
-
-function Section({ title, children }) {
-  return (
-    <div>
-      <p style={{ margin: "0 0 8px", fontSize: 12, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase", color: "var(--color-text-tertiary,#999)" }}>{title}</p>
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>{children}</div>
-    </div>
-  );
-}
-
-function Empty({ t }) {
-  return <p style={{ margin: 0, fontSize: 13, color: "var(--color-text-tertiary,#999)" }}>{t("hostcal.none")}</p>;
 }
 
 function EventRow({ ev, past, t, lang, busy, onOpen, onTrash }) {
