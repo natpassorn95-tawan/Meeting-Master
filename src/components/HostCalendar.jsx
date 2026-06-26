@@ -15,10 +15,10 @@ const ymd = (y, m, d) => `${y}-${String(m + 1).padStart(2, "0")}-${String(d).pad
 export default function HostCalendar({ go }) {
   const { t, lang } = useT();
   const [events, setEvents] = useState(null);
-  const [deleted, setDeleted] = useState([]);
+  const [cancelled, setCancelled] = useState([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [showDeleted, setShowDeleted] = useState(false);
+  const [showCancelled, setShowCancelled] = useState(false);
   const today = new Date();
   const todayStr = ymd(today.getFullYear(), today.getMonth(), today.getDate());
   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
@@ -29,9 +29,9 @@ export default function HostCalendar({ go }) {
     const from = ymd(today.getFullYear(), today.getMonth() - 1, 1);
     const to = ymd(today.getFullYear() + 1, today.getMonth(), 28);
     try {
-      const [evs, del] = await Promise.all([api.getCalendar(from, to), api.listDeletedMeetings().catch(() => [])]);
+      const [evs, canc] = await Promise.all([api.getCalendar(from, to), api.listCancelledMeetings().catch(() => [])]);
       setEvents(evs);
-      setDeleted(del);
+      setCancelled(canc);
       return evs;
     } catch (e) { setError(e.message); return null; }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -162,15 +162,15 @@ export default function HostCalendar({ go }) {
         )}
       </div>
 
-      {/* Folder: deleted meetings (restore / permanent delete) */}
+      {/* Folder: cancelled meetings (restore / permanent delete) */}
       <div style={card}>
-        <FolderHeader icon="🗑" label={`${t("hostcal.deletedFolder")} (${deleted.length})`} open={showDeleted} onToggle={() => setShowDeleted((v) => !v)} />
-        {showDeleted ? (
-          deleted.length === 0 ? (
-            <p style={{ margin: "12px 0 0", fontSize: 14, color: "var(--color-text-tertiary,#999)" }}>{t("hostcal.emptyDeleted")}</p>
+        <FolderHeader icon="🚫" label={`${t("hostcal.cancelledFolder")} (${cancelled.length})`} open={showCancelled} onToggle={() => setShowCancelled((v) => !v)} />
+        {showCancelled ? (
+          cancelled.length === 0 ? (
+            <p style={{ margin: "12px 0 0", fontSize: 14, color: "var(--color-text-tertiary,#999)" }}>{t("hostcal.emptyCancelled")}</p>
           ) : (
             <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-              {deleted.map((m) => (
+              {cancelled.map((m) => (
                 <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 12px", border: "0.5px solid rgba(0,0,0,.12)", borderRadius: 10, flexWrap: "wrap" }}>
                   <div style={{ minWidth: 0 }}>
                     <p style={{ margin: 0, fontSize: 15, fontWeight: 500, color: "var(--color-text-secondary)" }}>{m.title || "（未命名會議）"}</p>
@@ -179,8 +179,8 @@ export default function HostCalendar({ go }) {
                     </p>
                   </div>
                   <div style={{ display: "flex", gap: 6 }}>
-                    <button onClick={() => act(() => api.restoreMeeting(m.id))} disabled={busy} style={{ ...btn(false), height: 30, fontSize: 12, color: GREEN, borderColor: GREEN + "55" }}>↩ {t("hostcal.restore")}</button>
-                    <button onClick={() => { if (confirm(t("hostcal.purgeConfirm"))) act(() => api.purgeMeeting(m.id)); }} disabled={busy} style={{ ...btn(false), height: 30, fontSize: 12, color: RED, borderColor: RED + "55" }}>{t("hostcal.purge")}</button>
+                    <button onClick={() => act(() => api.restoreCancelled(m.id))} disabled={busy} style={{ ...btn(false), height: 30, fontSize: 12, color: GREEN, borderColor: GREEN + "55" }}>↩ {t("hostcal.restore")}</button>
+                    <button onClick={() => { if (confirm(t("hostcal.purgeConfirm"))) act(() => api.purgeCancelled(m.id)); }} disabled={busy} style={{ ...btn(false), height: 30, fontSize: 12, color: RED, borderColor: RED + "55" }}>{t("hostcal.purge")}</button>
                   </div>
                 </div>
               ))}

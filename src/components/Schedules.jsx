@@ -25,10 +25,15 @@ export default function Schedules({ go }) {
   const [runResult, setRunResult] = useState(null);
   const [busyId, setBusyId] = useState(null);
   const [showPassed, setShowPassed] = useState(false);
+  const [deleted, setDeleted] = useState([]);
+  const [showDeleted, setShowDeleted] = useState(false);
 
   const load = useCallback(async () => {
-    try { setSchedules(await api.listSchedules()); }
-    catch (e) { setError(e.message); }
+    try {
+      const [scheds, del] = await Promise.all([api.listSchedules(), api.listDeletedMeetings().catch(() => [])]);
+      setSchedules(scheds);
+      setDeleted(del);
+    } catch (e) { setError(e.message); }
   }, []);
   useEffect(() => { load(); }, [load]);
   // Recipient pool = registered Members (aligned with the Members page).
@@ -51,6 +56,10 @@ export default function Schedules({ go }) {
   }
   async function remove(id) {
     try { await api.deleteSchedule(id); load(); } catch (e) { setError(e.message); }
+  }
+  async function actDeleted(fn) {
+    setError("");
+    try { await fn(); await load(); } catch (e) { setError(e.message); }
   }
 
   return (
@@ -126,6 +135,34 @@ export default function Schedules({ go }) {
                 {showPassed ? <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 12 }}>{passed.map((s) => renderCard(s, true))}</div> : null}
               </div>
             ) : null}
+
+            {/* Deleted meetings: occurrences pulled here when a schedule is deleted */}
+            <div style={card}>
+              <button onClick={() => setShowDeleted((v) => !v)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", border: "none", background: "transparent", cursor: "pointer", fontSize: 15, fontWeight: 500, color: "var(--color-text-primary)", padding: 0 }}>
+                <span>🗑 {t("sched.deletedFolder")} ({deleted.length})</span>
+                <span style={{ color: "var(--color-text-tertiary,#999)" }}>{showDeleted ? "▲" : "▼"}</span>
+              </button>
+              {showDeleted ? (
+                deleted.length === 0 ? (
+                  <p style={{ margin: "12px 0 0", fontSize: 14, color: "var(--color-text-tertiary,#999)" }}>{t("sched.emptyDeleted")}</p>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
+                    {deleted.map((m) => (
+                      <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 12px", border: "0.5px solid rgba(0,0,0,.12)", borderRadius: 10, flexWrap: "wrap" }}>
+                        <div style={{ minWidth: 0 }}>
+                          <p style={{ margin: 0, fontSize: 15, fontWeight: 500, color: "var(--color-text-secondary)" }}>{m.title || "（未命名會議）"}</p>
+                          <p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--color-text-tertiary,#999)" }}>{fmtDateTimeI18n(m.date, m.startTime, m.endTime, lang)}{m.location ? `・${m.location}` : ""}</p>
+                        </div>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button onClick={() => actDeleted(() => api.restoreMeeting(m.id))} style={{ ...btn(false), height: 30, fontSize: 12, color: GREEN, borderColor: GREEN + "55" }}>↩ {t("sched.restore")}</button>
+                          <button onClick={() => { if (confirm(t("sched.purgeConfirm"))) actDeleted(() => api.purgeMeeting(m.id)); }} style={{ ...btn(false), height: 30, fontSize: 12, color: RED, borderColor: RED + "55" }}>{t("sched.purge")}</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )
+              ) : null}
+            </div>
           </div>
         );
       })()}

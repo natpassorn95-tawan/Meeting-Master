@@ -26,7 +26,7 @@ function fmtDatetime(date, start, end) {
   return time ? `${dateStr} ${time}` : dateStr;
 }
 
-const store = { meetings: {}, order: [], schedules: {}, scheduleOrder: [], members: {}, standing: {}, deleted: {} };
+const store = { meetings: {}, order: [], schedules: {}, scheduleOrder: [], members: {}, standing: {}, deleted: {}, cancelled: {} };
 
 // ── Persistence (data/store.json) ──────────────────────────────────────
 const DATA_FILE = fileURLToPath(new URL("../data/store.json", import.meta.url));
@@ -38,7 +38,7 @@ function saveStore() {
     fs.writeFileSync(DATA_FILE, JSON.stringify({
       meetings: store.meetings, order: store.order,
       schedules: store.schedules, scheduleOrder: store.scheduleOrder,
-      members: store.members, standing: store.standing, deleted: store.deleted, seq,
+      members: store.members, standing: store.standing, deleted: store.deleted, cancelled: store.cancelled, seq,
     }));
   } catch (e) { console.error("[store] save failed", e.message); }
 }
@@ -58,6 +58,7 @@ function loadStore() {
     store.members = d.members || {};
     store.standing = d.standing || {};
     store.deleted = d.deleted || {};
+    store.cancelled = d.cancelled || {};
     if (typeof d.seq === "number") seq = d.seq;
     console.log(`[store] loaded ${store.order.length} meetings, ${store.scheduleOrder.length} schedules, ${Object.keys(store.members).length} members`);
   } catch (e) { console.error("[store] load failed (starting fresh)", e.message); }
@@ -174,7 +175,7 @@ function createMeeting(input) {
   };
   store.meetings[id] = meeting;
   if (!store.order.includes(id)) store.order.unshift(id);
-  delete store.deleted[id]; // recreating a trashed id supersedes the trash copy
+  delete store.deleted[id]; delete store.cancelled[id]; // recreating supersedes any trashed/cancelled copy
   return meeting;
 }
 
@@ -523,11 +524,43 @@ function purgeMeeting(id) {
 function listDeleted() {
   return Object.values(store.deleted).sort((a, b) => (b.deletedAt || 0) - (a.deletedAt || 0));
 }
-function isTrashed(id) {
-  return !!store.deleted[id];
+
+// ── Cancelled (host cancelled the meeting) ─────────────────────────────
+// Separate bucket from deleted: populated by the Cancel-meeting action, shown
+// in the Host page "Cancelled meetings" folder (also restorable).
+function cancelMeeting(id) {
+  const m = store.meetings[id];
+  if (!m) return null;
+  m.cancelledAt = Date.now();
+  store.cancelled[id] = m;
+  delete store.meetings[id];
+  store.order = store.order.filter((x) => x !== id);
+  return m;
+}
+function restoreCancelled(id) {
+  const m = store.cancelled[id];
+  if (!m) return null;
+  delete m.cancelledAt;
+  store.meetings[id] = m;
+  if (!store.order.includes(id)) store.order.unshift(id);
+  delete store.cancelled[id];
+  return m;
+}
+function purgeCancelled(id) {
+  if (!store.cancelled[id]) return false;
+  delete store.cancelled[id];
+  return true;
+}
+function listCancelled() {
+  return Object.values(store.cancelled).sort((a, b) => (b.cancelledAt || 0) - (a.cancelledAt || 0));
 }
 
-export { ymd, nextOccurrence, occurrencesInRange, recurrenceSummary, decorateSchedule, createSchedule, listSchedules, getSchedule, updateSchedule, deleteSchedule, trashMeeting, restoreMeeting, purgeMeeting, listDeleted, isTrashed };
+// In either bucket → don't re-project this occurrence onto the calendar.
+function isTrashed(id) {
+  return !!store.deleted[id] || !!store.cancelled[id];
+}
+
+export { ymd, nextOccurrence, occurrencesInRange, recurrenceSummary, decorateSchedule, createSchedule, listSchedules, getSchedule, updateSchedule, deleteSchedule, trashMeeting, restoreMeeting, purgeMeeting, listDeleted, cancelMeeting, restoreCancelled, purgeCancelled, listCancelled, isTrashed };
 
 // A participant's meetings (by name). One row per schedule = the NEAREST
 // upcoming occurrence (weekly/monthly collapse to a single row); one-time

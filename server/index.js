@@ -103,9 +103,13 @@ app.post("/api/meetings", (req, res) => {
   res.status(201).json(db.createMeeting(req.body));
 });
 
-// ── Trash (Host "Deleted meetings" folder) ──────────────────────────────
-// Registered before "/:id" so "deleted" isn't matched as a meeting id.
+// ── Deleted folder (Schedules page) + Cancelled folder (Host page) ──────
+// "deleted"/"cancelled" GET routes are registered before "/:id" so they
+// aren't matched as a meeting id.
+// Deleted: schedules the admin deleted (their occurrences land here).
 app.get("/api/meetings/deleted", (_req, res) => res.json(db.listDeleted()));
+// Cancelled: meetings the host cancelled from the dashboard.
+app.get("/api/meetings/cancelled", (_req, res) => res.json(db.listCancelled()));
 
 app.post("/api/meetings/:id/trash", (req, res) => {
   const m = db.trashMeeting(req.params.id);
@@ -118,10 +122,19 @@ app.post("/api/meetings/:id/restore", (req, res) => {
   if (!m) return res.status(404).json({ error: "not in trash" });
   res.json(m);
 });
+app.post("/api/meetings/:id/restore-cancelled", (req, res) => {
+  const m = db.restoreCancelled(req.params.id);
+  if (!m) return res.status(404).json({ error: "not in cancelled" });
+  res.json(m);
+});
 
-// Permanent delete (purge from trash).
+// Permanent delete (purge from the deleted or cancelled folder).
 app.delete("/api/meetings/:id", (req, res) => {
   if (!db.purgeMeeting(req.params.id)) return res.status(404).json({ error: "not in trash" });
+  res.status(204).end();
+});
+app.delete("/api/meetings/:id/cancelled", (req, res) => {
+  if (!db.purgeCancelled(req.params.id)) return res.status(404).json({ error: "not in cancelled" });
   res.status(204).end();
 });
 
@@ -216,7 +229,7 @@ app.post("/api/meetings/:id/remind-unread", async (req, res) => {
 });
 
 // Cancel a meeting: notify every attendee (with a real LINE userId) that it is
-// cancelled, then move it to the trash (recoverable from the Deleted folder).
+// cancelled, then move it to the Host "Cancelled meetings" folder (restorable).
 app.post("/api/meetings/:id/cancel", async (req, res) => {
   const m = db.getMeeting(req.params.id);
   if (!m) return res.status(404).json({ error: "meeting not found" });
@@ -229,7 +242,7 @@ app.post("/api/meetings/:id/cancel", async (req, res) => {
       try { await pushTo(p.lineUserId, msg); pushed++; } catch { /* keep going */ }
     }
   }
-  db.trashMeeting(m.id);
+  db.cancelMeeting(m.id);
   res.json({ ok: true, pushed, recipients });
 });
 
