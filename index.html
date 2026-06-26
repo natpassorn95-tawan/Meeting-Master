@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-TW">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>會議大師 Meeting Master</title>
+    <style>
+      :root {
+        --color-background-primary: #fff;
+        --color-background-secondary: #f6f6f7;
+        --color-border-secondary: rgba(0, 0, 0, 0.3);
+        --color-border-tertiary: rgba(0, 0, 0, 0.12);
+        --color-text-primary: #111;
+        --color-text-secondary: #666;
+        --color-text-tertiary: #999;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        background: var(--color-background-secondary);
+        color: var(--color-text-primary);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC",
+          "PingFang TC", "Microsoft JhengHei", sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      #root { padding: 1.5rem 1rem; min-height: 100vh; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

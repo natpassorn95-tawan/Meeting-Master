@@ -1,0 +1,24 @@
+{
+  "name": "meeting-master",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Meeting Master (會議大師) — meeting lifecycle for Aiai. Starting with the Before-the-meeting LINE Meeting Notice (會議通知).",
+  "scripts": {
+    "dev": "concurrently -n api,web -c green,cyan \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:web": "vite",
+    "dev:api": "node server/index.js",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "express": "^4.21.2",
+    "vite": "^6.0.7"
+  }
+}
