@@ -32,6 +32,7 @@ export const api = {
   listCancelledMeetings: () => req("/meetings/cancelled"),
   restoreCancelled: (id) => post(`/meetings/${id}/restore-cancelled`),
   purgeCancelled: (id) => del(`/meetings/${id}/cancelled`),
+  trashMeeting: (id) => post(`/meetings/${id}/trash`),
   createMeeting: (m) => post("/meetings", m),
   updateMeta: (id, patchBody) => patch(`/meetings/${id}/meta`, patchBody),
   setTopics: (id, topics) => put(`/meetings/${id}/topics`, { topics }),
@@ -42,6 +43,7 @@ export const api = {
   // My Meetings (participant manages attendance across occurrences)
   myMeetings: (name, from, to) => req(`/my-meetings?name=${encodeURIComponent(name)}${from ? `&from=${from}` : ""}${to ? `&to=${to}` : ""}`),
   mySummary: (name, month) => req(`/my-meetings/summary?name=${encodeURIComponent(name)}&month=${month}`),
+  mySummaryRange: (name, from, to) => req(`/my-meetings/summary?name=${encodeURIComponent(name)}&from=${from}&to=${to || from}`),
   myMeetingsRsvp: (payload) => post("/my-meetings/rsvp", payload),
   getResponses: (id) => req(`/meetings/${id}/responses`),
   notify: (id, mode, to) => post(`/meetings/${id}/notify`, { mode, to }),

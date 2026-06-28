@@ -17,55 +17,42 @@ function fmtTs(ms, lang) {
   return new Date(ms).toLocaleString(lang === "en" ? "en-US" : "zh-TW", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-export default function Schedules({ go }) {
+// Recurring-schedule list (active + passed folder), with run-now / enable /
+// disable / delete. Self-loads its own schedules; reloads when `reloadToken`
+// changes (e.g. after the parent creates a new schedule) and calls `onMutated`
+// after any change so the parent calendar/trash can refresh too.
+export function ScheduleList({ go, reloadToken, onMutated }) {
   const { t, lang } = useT();
   const [schedules, setSchedules] = useState(null);
-  const [pool, setPool] = useState([]);
   const [error, setError] = useState("");
   const [runResult, setRunResult] = useState(null);
   const [busyId, setBusyId] = useState(null);
   const [showPassed, setShowPassed] = useState(false);
-  const [deleted, setDeleted] = useState([]);
-  const [showDeleted, setShowDeleted] = useState(false);
 
   const load = useCallback(async () => {
-    try {
-      const [scheds, del] = await Promise.all([api.listSchedules(), api.listDeletedMeetings().catch(() => [])]);
-      setSchedules(scheds);
-      setDeleted(del);
-    } catch (e) { setError(e.message); }
+    try { setSchedules(await api.listSchedules()); }
+    catch (e) { setError(e.message); }
   }, []);
-  useEffect(() => { load(); }, [load]);
-  // Recipient pool = registered Members (aligned with the Members page).
-  useEffect(() => {
-    api.listMembers()
-      .then((ms) => setPool(ms.filter((m) => m.status === "registered").map((m) => ({
-        id: m.lineUserId, name: m.name, dept: m.employeeId || "—", lineUserId: m.lineUserId,
-      }))))
-      .catch(() => {});
-  }, []);
+  useEffect(() => { load(); }, [load, reloadToken]);
 
+  const notify = () => { if (onMutated) onMutated(); };
   async function runNow(id) {
     setBusyId(id); setRunResult(null); setError("");
     try { setRunResult(await api.runSchedule(id)); }
     catch (e) { setError(e.message); }
-    finally { setBusyId(null); load(); }
+    finally { setBusyId(null); load(); notify(); }
   }
   async function toggle(s) {
-    try { await api.updateSchedule(s.id, { enabled: !s.enabled }); load(); } catch (e) { setError(e.message); }
+    try { await api.updateSchedule(s.id, { enabled: !s.enabled }); load(); notify(); } catch (e) { setError(e.message); }
   }
   async function remove(id) {
-    try { await api.deleteSchedule(id); load(); } catch (e) { setError(e.message); }
-  }
-  async function actDeleted(fn) {
-    setError("");
-    try { await fn(); await load(); } catch (e) { setError(e.message); }
+    try { await api.deleteSchedule(id); load(); notify(); } catch (e) { setError(e.message); }
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={card}>
-        <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 500 }}>{t("sched.heading")}</h2>
+        <h2 style={{ margin: "0 0 4px", fontSize: 18, fontWeight: 500 }}>{t("sched.heading")}</h2>
         <p style={{ margin: 0, fontSize: 14, color: "var(--color-text-secondary)" }}>{t("sched.desc")}</p>
       </div>
 
@@ -135,46 +122,22 @@ export default function Schedules({ go }) {
                 {showPassed ? <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 12 }}>{passed.map((s) => renderCard(s, true))}</div> : null}
               </div>
             ) : null}
-
-            {/* Deleted meetings: occurrences pulled here when a schedule is deleted */}
-            <div style={card}>
-              <button onClick={() => setShowDeleted((v) => !v)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", border: "none", background: "transparent", cursor: "pointer", fontSize: 15, fontWeight: 500, color: "var(--color-text-primary)", padding: 0 }}>
-                <span>🗑 {t("sched.deletedFolder")} ({deleted.length})</span>
-                <span style={{ color: "var(--color-text-tertiary,#999)" }}>{showDeleted ? "▲" : "▼"}</span>
-              </button>
-              {showDeleted ? (
-                deleted.length === 0 ? (
-                  <p style={{ margin: "12px 0 0", fontSize: 14, color: "var(--color-text-tertiary,#999)" }}>{t("sched.emptyDeleted")}</p>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
-                    {deleted.map((m) => (
-                      <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 12px", border: "0.5px solid rgba(0,0,0,.12)", borderRadius: 10, flexWrap: "wrap" }}>
-                        <div style={{ minWidth: 0 }}>
-                          <p style={{ margin: 0, fontSize: 15, fontWeight: 500, color: "var(--color-text-secondary)" }}>{m.title || "（未命名會議）"}</p>
-                          <p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--color-text-tertiary,#999)" }}>{fmtDateTimeI18n(m.date, m.startTime, m.endTime, lang)}{m.location ? `・${m.location}` : ""}</p>
-                        </div>
-                        <div style={{ display: "flex", gap: 6 }}>
-                          <button onClick={() => actDeleted(() => api.restoreMeeting(m.id))} style={{ ...btn(false), height: 30, fontSize: 12, color: GREEN, borderColor: GREEN + "55" }}>↩ {t("sched.restore")}</button>
-                          <button onClick={() => { if (confirm(t("sched.purgeConfirm"))) actDeleted(() => api.purgeMeeting(m.id)); }} style={{ ...btn(false), height: 30, fontSize: 12, color: RED, borderColor: RED + "55" }}>{t("sched.purge")}</button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )
-              ) : null}
-            </div>
           </div>
         );
       })()}
-
-      <CreateForm pool={pool} onCreated={() => { setRunResult(null); load(); }} setError={setError} />
     </div>
   );
 }
 
-function CreateForm({ pool, onCreated, setError }) {
+// Create a recurring schedule (or one-time meetings). Rendered as the body of a
+// modal popup by the host calendar. `dates` is the set of YYYY-MM-DD days the
+// admin selected on the calendar (drag for a range): one date → a single meeting
+// (freq still switchable to weekly/monthly); multiple dates → a one-time meeting
+// is created on each selected day. Self-loads its recipient pool from Members.
+export function CreateForm({ dates = [], onCreated, onClose, setError }) {
   const { t, lang, weekdayFull } = useT();
-  const [open, setOpen] = useState(false);
+  const multi = dates.length > 1;
+  const [pool, setPool] = useState([]);
   const [f, setF] = useState({
     title: "", location: "", host: "", startTime: "14:00", endTime: "15:30",
     freq: "weekly", weekday: 5, nth: 1, date: "", startDate: "", endDate: "", leads: [15], topics: "",
@@ -184,10 +147,26 @@ function CreateForm({ pool, onCreated, setError }) {
   const [attachments, setAttachments] = useState([]); // [{ url, name, type, size }]
   const [uploading, setUploading] = useState(false);
 
-  useEffect(() => { setRecipients(pool.map((p) => p.id)); }, [pool]);
+  // Recipient pool = registered Members (aligned with the Members page).
+  useEffect(() => {
+    api.listMembers()
+      .then((ms) => {
+        const p = ms.filter((m) => m.status === "registered").map((m) => ({
+          id: m.lineUserId, name: m.name, dept: m.employeeId || "—", lineUserId: m.lineUserId,
+        }));
+        setPool(p);
+        setRecipients(p.map((x) => x.id));
+      })
+      .catch(() => {});
+  }, []);
+
+  // A single clicked date → default to a one-time meeting on that date.
+  useEffect(() => {
+    if (dates.length === 1) setF((prev) => ({ ...prev, freq: "once", date: dates[0] }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dates.join(",")]);
 
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
-  const toggleR = (id) => setRecipients((r) => r.includes(id) ? r.filter((x) => x !== id) : [...r, id]);
   const toggleLead = (v) => setF((prev) => ({ ...prev, leads: prev.leads.includes(v) ? prev.leads.filter((x) => x !== v) : [...prev.leads, v] }));
 
   const fileToDataUrl = (file) => new Promise((res, rej) => {
@@ -212,37 +191,47 @@ function CreateForm({ pool, onCreated, setError }) {
 
   async function create() {
     if (!f.title.trim()) { setError(t("sched.errTitle")); return; }
-    if (f.freq === "once" && !f.date) { setError(t("sched.errDate")); return; }
+    if (!multi && f.freq === "once" && !f.date) { setError(t("sched.errDate")); return; }
     if (f.endTime && f.startTime >= f.endTime) { setError(t("sched.errTime")); return; } // start must be before end
     setSaving(true); setError("");
+    const base = {
+      title: f.title.trim(), location: f.location.trim(), host: f.host.trim(),
+      startTime: f.startTime, endTime: f.endTime,
+      leads: f.leads.length ? f.leads : [15],
+      topics: f.topics.split("\n").map((x) => x.trim()).filter(Boolean),
+      attachments,
+      roster: pool, recipientIds: recipients,
+    };
     try {
-      await api.createSchedule({
-        title: f.title.trim(), location: f.location.trim(), host: f.host.trim(),
-        startTime: f.startTime, endTime: f.endTime,
-        recurrence: { freq: f.freq, weekday: Number(f.weekday), nth: Number(f.nth), date: f.date },
-        startDate: f.freq === "once" ? "" : f.startDate,
-        endDate: f.freq === "once" ? "" : f.endDate,
-        leads: f.leads.length ? f.leads : [15],
-        topics: f.topics.split("\n").map((x) => x.trim()).filter(Boolean),
-        attachments,
-        roster: pool, recipientIds: recipients,
-      });
-      setF({ ...f, title: "" }); setAttachments([]); setOpen(false); onCreated();
+      let notified = 0;
+      const tally = (r) => { if (r?.notify) notified += r.notify.count || 0; };
+      if (multi) {
+        // One one-time meeting per selected day.
+        for (const d of dates) {
+          tally(await api.createSchedule({ ...base, recurrence: { freq: "once", weekday: 0, nth: 1, date: d }, startDate: "", endDate: "" }));
+        }
+      } else {
+        tally(await api.createSchedule({
+          ...base,
+          recurrence: { freq: f.freq, weekday: Number(f.weekday), nth: Number(f.nth), date: f.date },
+          startDate: f.freq === "once" ? "" : f.startDate,
+          endDate: f.freq === "once" ? "" : f.endDate,
+        }));
+      }
+      setF({ ...f, title: "" }); setAttachments([]);
+      alert(notified > 0 ? t("sched.notified", { count: notified }) : t("sched.notifyNone"));
+      onCreated(); onClose();
     } catch (e) { setError(e.message); }
     finally { setSaving(false); }
   }
 
-  if (!open) {
-    return <button onClick={() => setOpen(true)} style={{ ...btn(true), alignSelf: "flex-start" }}>{t("sched.add")}</button>;
-  }
-
   const selStyle = { ...input, appearance: "auto" };
   return (
-    <div style={card}>
-      <h3 style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 500 }}>{t("sched.createTitle")}</h3>
+    <div>
+      <h3 style={{ margin: "0 0 16px", fontSize: 18, fontWeight: 500 }}>{multi ? t("sched.createTitleMulti", { n: dates.length }) : t("sched.createTitle")}</h3>
 
       <label style={label}>{t("sched.title")}</label>
-      <input style={input} value={f.title} onChange={set("title")} placeholder={t("sched.titlePlaceholder")} />
+      <input style={input} value={f.title} onChange={set("title")} placeholder={t("sched.titlePlaceholder")} autoFocus />
       <div style={{ height: 14 }} />
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
         <div style={{ flex: "1 1 200px" }}><label style={label}>{t("label.location")}</label><input style={input} value={f.location} onChange={set("location")} placeholder={t("sched.locPlaceholder")} /></div>
@@ -250,40 +239,53 @@ function CreateForm({ pool, onCreated, setError }) {
       </div>
 
       <div style={{ height: 14 }} />
-      <label style={label}>{t("sched.recurrence")}</label>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-        <select style={{ ...selStyle, flex: "0 0 120px" }} value={f.freq} onChange={set("freq")}>
-          <option value="once">{t("freq.once")}</option>
-          <option value="weekly">{t("freq.weekly")}</option>
-          <option value="monthly">{t("freq.monthly")}</option>
-        </select>
-        {f.freq === "once" ? (
-          <input type="date" style={{ ...selStyle, flex: "1 1 170px" }} value={f.date} onChange={set("date")} />
-        ) : (
-          <>
-            {f.freq === "monthly" ? (
-              <select style={{ ...selStyle, flex: "0 0 120px" }} value={f.nth} onChange={set("nth")}>
-                {NTHS.map((n) => <option key={n} value={n}>{ordinalText(n, lang)}</option>)}
-              </select>
-            ) : null}
-            <select style={{ ...selStyle, flex: "0 0 130px" }} value={f.weekday} onChange={set("weekday")}>
-              {[0, 1, 2, 3, 4, 5, 6].map((i) => <option key={i} value={i}>{weekdayFull(i)}</option>)}
-            </select>
-          </>
-        )}
-      </div>
-      {f.freq !== "once" ? (
+      {multi ? (
         <>
-          <div style={{ height: 10 }} />
-          <label style={label}>{t("sched.period")}</label>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <input type="date" style={{ ...selStyle, flex: "1 1 150px" }} value={f.startDate} onChange={set("startDate")} />
-            <span style={{ color: "var(--color-text-tertiary,#999)" }}>–</span>
-            <input type="date" style={{ ...selStyle, flex: "1 1 150px" }} value={f.endDate} onChange={set("endDate")} />
+          <label style={label}>{t("sched.selectedDates", { n: dates.length })}</label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {dates.map((d) => (
+              <span key={d} style={{ padding: "4px 10px", fontSize: 13, borderRadius: 999, background: ACCENT + "1A", color: ACCENT, fontWeight: 500 }}>{d}</span>
+            ))}
           </div>
-          <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--color-text-tertiary,#999)" }}>{t("sched.periodHint")}</p>
         </>
-      ) : null}
+      ) : (
+        <>
+          <label style={label}>{t("sched.recurrence")}</label>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <select style={{ ...selStyle, flex: "0 0 120px" }} value={f.freq} onChange={set("freq")}>
+              <option value="once">{t("freq.once")}</option>
+              <option value="weekly">{t("freq.weekly")}</option>
+              <option value="monthly">{t("freq.monthly")}</option>
+            </select>
+            {f.freq === "once" ? (
+              <input type="date" style={{ ...selStyle, flex: "1 1 170px" }} value={f.date} onChange={set("date")} />
+            ) : (
+              <>
+                {f.freq === "monthly" ? (
+                  <select style={{ ...selStyle, flex: "0 0 120px" }} value={f.nth} onChange={set("nth")}>
+                    {NTHS.map((n) => <option key={n} value={n}>{ordinalText(n, lang)}</option>)}
+                  </select>
+                ) : null}
+                <select style={{ ...selStyle, flex: "0 0 130px" }} value={f.weekday} onChange={set("weekday")}>
+                  {[0, 1, 2, 3, 4, 5, 6].map((i) => <option key={i} value={i}>{weekdayFull(i)}</option>)}
+                </select>
+              </>
+            )}
+          </div>
+          {f.freq !== "once" ? (
+            <>
+              <div style={{ height: 10 }} />
+              <label style={label}>{t("sched.period")}</label>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <input type="date" style={{ ...selStyle, flex: "1 1 150px" }} value={f.startDate} onChange={set("startDate")} />
+                <span style={{ color: "var(--color-text-tertiary,#999)" }}>–</span>
+                <input type="date" style={{ ...selStyle, flex: "1 1 150px" }} value={f.endDate} onChange={set("endDate")} />
+              </div>
+              <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--color-text-tertiary,#999)" }}>{t("sched.periodHint")}</p>
+            </>
+          ) : null}
+        </>
+      )}
 
       <div style={{ height: 14 }} />
       <label style={label}>{t("label.time")}</label>
@@ -311,20 +313,7 @@ function CreateForm({ pool, onCreated, setError }) {
 
       <div style={{ height: 14 }} />
       <label style={label}>{t("sched.recipientsLabel", { a: recipients.length, b: pool.length })}</label>
-      {pool.length === 0 ? (
-        <p style={{ margin: 0, fontSize: 13, color: "var(--color-text-tertiary,#999)" }}>{t("sched.noMembers")}</p>
-      ) : (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-          {pool.map((p) => {
-            const on = recipients.includes(p.id);
-            return (
-              <button key={p.id} onClick={() => toggleR(p.id)} style={{ height: 34, padding: "0 12px", fontSize: 13, borderRadius: 999, cursor: "pointer", border: on ? "none" : "0.5px solid rgba(0,0,0,.25)", background: on ? ACCENT : "transparent", color: on ? "#fff" : "var(--color-text-primary)" }}>
-                {on ? "✓ " : ""}{p.name}
-              </button>
-            );
-          })}
-        </div>
-      )}
+      <RecipientPicker pool={pool} recipients={recipients} setRecipients={setRecipients} />
 
       <div style={{ height: 14 }} />
       <label style={label}>{t("sched.topicsLabel")}</label>
@@ -348,10 +337,83 @@ function CreateForm({ pool, onCreated, setError }) {
       <div style={{ height: 18 }} />
       <div style={{ display: "flex", gap: 8 }}>
         {(() => { const badTime = !!f.endTime && f.startTime >= f.endTime; return (
-          <button onClick={create} disabled={saving || badTime} style={{ ...btn(true), flex: 1, opacity: saving || badTime ? 0.5 : 1 }}>{saving ? t("sched.creating") : t("sched.create")}</button>
+          <button onClick={create} disabled={saving || badTime} style={{ ...btn(true), flex: 1, opacity: saving || badTime ? 0.5 : 1 }}>
+            {saving ? t("sched.creating") : multi ? t("sched.createMulti", { n: dates.length }) : t("sched.create")}
+          </button>
         ); })()}
-        <button onClick={() => setOpen(false)} style={{ ...btn(false), flex: "0 0 100px" }}>{t("common.cancel")}</button>
+        <button onClick={onClose} style={{ ...btn(false), flex: "0 0 100px" }}>{t("common.cancel")}</button>
       </div>
+    </div>
+  );
+}
+
+// Recipient multi-select shown as a dropdown: a summary button that expands an
+// inline, searchable checklist with select-all / clear. Scales to many members
+// (scrolls) far better than a flat row of toggle chips.
+function RecipientPicker({ pool, recipients, setRecipients }) {
+  const { t } = useT();
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+
+  if (pool.length === 0) {
+    return <p style={{ margin: 0, fontSize: 13, color: "var(--color-text-tertiary,#999)" }}>{t("sched.noMembers")}</p>;
+  }
+
+  const sel = recipients.length;
+  const all = pool.length;
+  const query = q.trim().toLowerCase();
+  const filtered = query ? pool.filter((p) => `${p.name} ${p.dept}`.toLowerCase().includes(query)) : pool;
+  const toggle = (id) => setRecipients((r) => r.includes(id) ? r.filter((x) => x !== id) : [...r, id]);
+  const summary = sel === 0 ? t("sched.recipientsNone")
+    : sel === all ? t("sched.recipientsAll", { n: all })
+    : pool.filter((p) => recipients.includes(p.id)).map((p) => p.name).join("、");
+
+  const rowCheck = (on) => ({
+    width: 18, height: 18, borderRadius: 5, flexShrink: 0,
+    border: on ? "none" : "1px solid rgba(0,0,0,.3)", background: on ? ACCENT : "transparent",
+    color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12,
+  });
+
+  return (
+    <div>
+      <button
+        type="button" onClick={() => setOpen((o) => !o)}
+        style={{ ...input, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, cursor: "pointer", textAlign: "left" }}
+      >
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: sel ? "var(--color-text-primary)" : "var(--color-text-tertiary,#999)" }}>{summary}</span>
+        <span style={{ flexShrink: 0, fontSize: 12, color: "var(--color-text-tertiary,#999)" }}>{sel}/{all} {open ? "▲" : "▼"}</span>
+      </button>
+      {open ? (
+        <div style={{ marginTop: 6, border: "0.5px solid rgba(0,0,0,.2)", borderRadius: 10, background: "#fff", overflow: "hidden" }}>
+          <div style={{ display: "flex", gap: 8, padding: 8, borderBottom: "0.5px solid rgba(0,0,0,.1)", alignItems: "center" }}>
+            <input
+              value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("sched.searchRecipients")}
+              style={{ ...input, height: 34, flex: 1 }}
+            />
+            <button type="button" onClick={() => setRecipients(pool.map((p) => p.id))} style={{ ...btn(false), height: 34, fontSize: 12, whiteSpace: "nowrap" }}>{t("sched.selectAll")}</button>
+            <button type="button" onClick={() => setRecipients([])} style={{ ...btn(false), height: 34, fontSize: 12, whiteSpace: "nowrap" }}>{t("sched.clearAll")}</button>
+          </div>
+          <div style={{ maxHeight: 220, overflowY: "auto" }}>
+            {filtered.length === 0 ? (
+              <p style={{ margin: 0, padding: "12px", fontSize: 13, color: "var(--color-text-tertiary,#999)" }}>{t("sched.noMatch")}</p>
+            ) : filtered.map((p) => {
+              const on = recipients.includes(p.id);
+              return (
+                <button
+                  key={p.id} type="button" onClick={() => toggle(p.id)}
+                  style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", border: "none", borderTop: "0.5px solid rgba(0,0,0,.06)", background: on ? ACCENT + "0F" : "transparent", cursor: "pointer", textAlign: "left" }}
+                >
+                  <span style={rowCheck(on)}>{on ? "✓" : ""}</span>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ fontSize: 14, fontWeight: 500 }}>{p.name}</span>
+                    {p.dept && p.dept !== "—" ? <span style={{ fontSize: 12, color: "var(--color-text-secondary)", marginLeft: 8 }}>{p.dept}</span> : null}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

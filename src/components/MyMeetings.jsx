@@ -5,6 +5,7 @@ import { useT, fmtDateTimeI18n } from "../i18n.jsx";
 import { liffConfigured, getLiffProfile } from "../liff.js";
 
 const NAME_KEY = "mm_name";
+const localToday = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 
 // Participant self-service: review upcoming meetings (including recurring
 // occurrences) and confirm attendance or take leave per day.
@@ -30,24 +31,31 @@ export default function MyMeetings({ userId }) {
   const [items, setItems] = useState(null);
   const [error, setError] = useState("");
   const [busyKey, setBusyKey] = useState("");
-  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [summary, setSummary] = useState(null);
-  const [filterDate, setFilterDate] = useState(""); // "" = all upcoming
+  const todayStr = localToday();
+  // Date-range filter. Default to TODAY (the LINE "我的會議" entry lands here); a
+  // multi-day range is supported via the two date inputs; "All" clears both.
+  const [from, setFrom] = useState(todayStr);
+  const [to, setTo] = useState(todayStr);
+  // Label for the stats period: a month when "All", a single date, or a range.
+  const periodLabel = !from ? todayStr.slice(0, 7) : (to && to !== from ? `${from} → ${to}` : from);
 
   const load = useCallback(async () => {
     if (!name) return;
     try {
-      const d = filterDate ? await api.myMeetings(name, filterDate, filterDate) : await api.myMeetings(name);
+      const d = from ? await api.myMeetings(name, from, to || from) : await api.myMeetings(name);
       setItems(d.items);
     } catch (e) { setError(e.message); }
-  }, [name, filterDate]);
+  }, [name, from, to]);
   useEffect(() => { load(); }, [load]);
 
-  // Monthly performance for the selected month.
+  // Performance over the selected window (range), or the current month when "All".
   useEffect(() => {
     if (!name) return;
-    api.mySummary(name, month).then(setSummary).catch(() => {});
-  }, [name, month, items]);
+    const p = from ? api.mySummaryRange(name, from, to || from) : api.mySummary(name, todayStr.slice(0, 7));
+    p.then(setSummary).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [name, from, to, items]);
 
   const keyOf = (it) => it.meetingId || `${it.scheduleId}__${it.occKey}`;
 
@@ -92,11 +100,13 @@ export default function MyMeetings({ userId }) {
         </p>
       </div>
 
-      {/* Date filter */}
+      {/* Date filter — single day or a multi-day range (drives the list + stats) */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
         <span style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>{t("mymeetings.filter")}</span>
-        <button onClick={() => setFilterDate("")} style={{ height: 32, padding: "0 14px", fontSize: 13, borderRadius: 999, cursor: "pointer", border: filterDate ? "0.5px solid rgba(0,0,0,.25)" : "none", background: filterDate ? "transparent" : ACCENT, color: filterDate ? "var(--color-text-primary)" : "#fff" }}>{t("mymeetings.all")}</button>
-        <input type="date" value={filterDate} onChange={(e) => setFilterDate(e.target.value)} style={{ ...input, width: "auto", height: 32, appearance: "auto" }} />
+        <button onClick={() => { setFrom(""); setTo(""); }} style={{ height: 32, padding: "0 14px", fontSize: 13, borderRadius: 999, cursor: "pointer", border: from ? "0.5px solid rgba(0,0,0,.25)" : "none", background: from ? "transparent" : ACCENT, color: from ? "var(--color-text-primary)" : "#fff" }}>{t("mymeetings.all")}</button>
+        <input type="date" value={from} onChange={(e) => { const v = e.target.value; setFrom(v); if (v && (!to || to < v)) setTo(v); }} style={{ ...input, width: "auto", height: 32, appearance: "auto" }} />
+        <span style={{ color: "var(--color-text-tertiary,#999)" }}>–</span>
+        <input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} disabled={!from} style={{ ...input, width: "auto", height: 32, appearance: "auto", opacity: from ? 1 : 0.5 }} />
       </div>
 
       {error ? <div style={{ ...card, marginBottom: 12, borderColor: RED, color: RED, fontSize: 14 }}>⚠ {error}</div> : null}
@@ -115,7 +125,7 @@ export default function MyMeetings({ userId }) {
       <div style={{ ...card, marginTop: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 8, flexWrap: "wrap" }}>
           <h3 style={{ margin: 0, fontSize: 15, fontWeight: 500 }}>📊 {t("perf.title")}</h3>
-          <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} style={{ ...input, width: "auto", height: 34, appearance: "auto" }} />
+          <span style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>{periodLabel}</span>
         </div>
         {summary ? (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8 }}>
@@ -148,13 +158,18 @@ function Row({ it, t, lang, busy, onSet }) {
   const isLeave = it.rsvp === "leave";
   const isYes = it.rsvp === "yes";
   const [reason, setReason] = useState(it.leaveReason?.type || LEAVE_TYPES[0]);
+  // A meeting is locked once it has ended (current/ongoing + future stay editable).
+  // Fall back to end-of-day when there's no end time so an ongoing day isn't locked.
+  const endMs = Date.parse(`${it.date}T${it.endTime || it.startTime || "23:59"}:00`);
+  const past = Number.isFinite(endMs) && endMs < Date.now();
   const optBtn = (active, color, text, onClick) => (
     <button onClick={onClick} disabled={busy} style={{ flex: 1, height: 38, fontSize: 13, fontWeight: 500, borderRadius: 8, cursor: "pointer", border: active ? "none" : "0.5px solid rgba(0,0,0,.2)", background: active ? color : "transparent", color: active ? "#fff" : "var(--color-text-primary)", opacity: busy ? 0.6 : 1 }}>{text}</button>
   );
   return (
-    <div style={card}>
+    <div style={{ ...card, ...(past ? { opacity: 0.75 } : {}) }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
         <p style={{ margin: 0, fontSize: 16, fontWeight: 500 }}>{it.title || "（未命名會議）"}</p>
+        {past ? <span style={pill("rgba(0,0,0,.06)", "#888")}>{t("mymeetings.passedTag")}</span> : null}
         {isYes ? <span style={pill("#E1F5EE", GREEN)}>{t("mymeetings.confirmed")}</span> : null}
         {isLeave ? <span style={pill("#F7E4EC", RED)}>{t("mymeetings.onLeave")}</span> : null}
       </div>
@@ -162,18 +177,24 @@ function Row({ it, t, lang, busy, onSet }) {
         {fmtDateTimeI18n(it.date, it.startTime, it.endTime, lang)}
         {it.recurring ? <span style={{ marginLeft: 6, fontSize: 12, color: "var(--color-text-tertiary,#999)" }}>🔁 {t("mymeetings.nextOccurrence")}</span> : null}
       </p>
-      <div style={{ display: "flex", gap: 8 }}>
-        {optBtn(isYes, GREEN, t("mymeetings.attend"), () => onSet(it, "yes"))}
-        {optBtn(isLeave, RED, t("mymeetings.leave"), () => onSet(it, "leave", { type: reason, text: "" }))}
-      </div>
-      {isLeave ? (
-        <div style={{ marginTop: 10 }}>
-          <label style={label}>{t("leave.heading")}</label>
-          <select style={{ ...input, appearance: "auto" }} value={reason} onChange={(e) => { setReason(e.target.value); onSet(it, "leave", { type: e.target.value, text: "" }); }}>
-            {LEAVE_TYPES.map((ty) => <option key={ty} value={ty}>{t(`leaveType.${ty}`)}</option>)}
-          </select>
-        </div>
-      ) : null}
+      {past ? (
+        <p style={{ margin: 0, fontSize: 13, color: "var(--color-text-tertiary,#999)" }}>🔒 {t("mymeetings.passed")}</p>
+      ) : (
+        <>
+          <div style={{ display: "flex", gap: 8 }}>
+            {optBtn(isYes, GREEN, t("mymeetings.attend"), () => onSet(it, "yes"))}
+            {optBtn(isLeave, RED, t("mymeetings.leave"), () => onSet(it, "leave", { type: reason, text: "" }))}
+          </div>
+          {isLeave ? (
+            <div style={{ marginTop: 10 }}>
+              <label style={label}>{t("leave.heading")}</label>
+              <select style={{ ...input, appearance: "auto" }} value={reason} onChange={(e) => { setReason(e.target.value); onSet(it, "leave", { type: e.target.value, text: "" }); }}>
+                {LEAVE_TYPES.map((ty) => <option key={ty} value={ty}>{t(`leaveType.${ty}`)}</option>)}
+              </select>
+            </div>
+          ) : null}
+        </>
+      )}
     </div>
   );
 }

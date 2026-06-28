@@ -328,10 +328,17 @@ app.get("/api/my-meetings", (req, res) => {
   res.json({ name, items: db.memberUpcoming(name, fromMs, toMs) });
 });
 
-// Per-participant monthly performance (resets each month; pick any month).
+// Per-participant performance. Pass from/to (YYYY-MM-DD) for an arbitrary date
+// window (one day or a multi-day range), or month (YYYY-MM) for a whole month.
 app.get("/api/my-meetings/summary", (req, res) => {
   const name = String(req.query.name || "").trim();
   if (!name) return res.status(400).json({ error: "name required" });
+  const ymd = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || "");
+  if (ymd(req.query.from)) {
+    const from = req.query.from;
+    const to = ymd(req.query.to) && req.query.to >= from ? req.query.to : from;
+    return res.json(db.memberRangeSummary(name, from, to));
+  }
   const month = /^\d{4}-\d{2}$/.test(req.query.month || "") ? req.query.month : new Date().toISOString().slice(0, 7);
   res.json(db.memberMonthlySummary(name, month));
 });
@@ -496,12 +503,20 @@ async function fireSchedule(s, { live = true } = {}) {
 
   // Only registered recipients (bound to a real LINE userId) receive the notice.
   // Unregistered / unbound people get nothing — never a broadcast to all.
+  // NOTE: push to each recipient individually rather than multicast — multicast
+  // and broadcast are accepted (HTTP 200) but NOT delivered on unverified LINE
+  // Official Accounts, whereas push to a friend always works. This matches the
+  // cancel / remind-unread flows.
   const ids = recipients.map((p) => p.lineUserId).filter((id) => /^U[0-9a-f]{32}$/.test(id || ""));
   let mode = "skipped", count = 0;
   if (live && LINE_CONFIGURED) {
     if (ids.length) {
-      try { await multicast(ids, [buildNoticeMessage(meeting, BASE_URL)]); mode = "multicast"; count = ids.length; }
-      catch (e) { mode = "error"; meeting._sendError = e.message; }
+      const msg = [buildNoticeMessage(meeting, BASE_URL)];
+      for (const id of ids) {
+        try { await pushTo(id, msg); count++; }
+        catch (e) { meeting._sendError = e.message; }
+      }
+      mode = count > 0 ? "push" : "error";
     } else {
       mode = "no-recipients"; // nobody registered/bound → nobody notified (by design)
     }
@@ -561,13 +576,29 @@ app.post("/api/schedules/:id/materialize", (req, res) => {
 
 app.get("/api/schedules", (_req, res) => res.json(db.listSchedules()));
 
-app.post("/api/schedules", (req, res) => {
+app.post("/api/schedules", async (req, res) => {
   if (!String(req.body?.title || "").trim()) return res.status(400).json({ error: "title is required" });
   const { startTime, endTime } = req.body || {};
   if (endTime && startTime && startTime >= endTime) {
     return res.status(400).json({ error: "start time must be before end time" });
   }
-  res.status(201).json(db.decorateSchedule(db.createSchedule(req.body), Date.now()));
+  const s = db.createSchedule(req.body);
+
+  // Notify the selected recipients immediately on creation (next occurrence).
+  // Mark that occurrence's lead windows as already fired so the background
+  // scheduler doesn't send the same notice a second time.
+  let notify = null;
+  try {
+    notify = await fireSchedule(s, { live: true });
+    if (notify?.meetingId) {
+      const occKey = notify.meetingId.slice(notify.meetingId.indexOf("__") + 2);
+      for (const lead of s.leads) s.fired[`${occKey}@${lead}`] = true;
+    }
+  } catch (e) {
+    notify = { mode: "error", error: e.message };
+  }
+
+  res.status(201).json({ ...db.decorateSchedule(s, Date.now()), notify });
 });
 
 app.patch("/api/schedules/:id", (req, res) => {

@@ -4,7 +4,6 @@ import { ACCENT, GREEN, RED } from "./ui.js";
 import { useT } from "./i18n.jsx";
 import HostDashboard from "./components/HostDashboard.jsx";
 import Invite from "./components/Invite.jsx";
-import Schedules from "./components/Schedules.jsx";
 import Members from "./components/Members.jsx";
 import Register from "./components/Register.jsx";
 import HostCalendar from "./components/HostCalendar.jsx";
@@ -13,11 +12,12 @@ import CheckIn from "./components/CheckIn.jsx";
 
 const DEFAULT_MEETING = "M202607";
 
-// Admin pages (compose/schedules/manage/members/host) are only available on the
-// operator's own machine/LAN. The public tunnel host (what participants open
-// from LINE) is restricted to the participant screens — so users never see the
-// admin UI, and the admin nav isn't even rendered for them.
-const ADMIN_VIEWS = new Set(["schedules", "members", "host"]);
+// Admin pages (members/host) are only available on the operator's own
+// machine/LAN. The public tunnel host (what participants open from LINE) is
+// restricted to the participant screens — so users never see the admin UI, and
+// the admin nav isn't even rendered for them. (Scheduling now lives inside the
+// Host calendar page, so there's no separate Schedules view.)
+const ADMIN_VIEWS = new Set(["members", "host"]);
 const PARTICIPANT_VIEWS = new Set(["invite", "register", "mymeetings", "checkin"]);
 // Admin passcode — lets the admin unlock the console on any device (e.g. phone).
 // Configurable via VITE_ADMIN_CODE; client-side gate (keeps participants out, not
@@ -36,8 +36,10 @@ function isAdminHost() {
 
 function readUrl() {
   const q = new URLSearchParams(window.location.search);
+  // "schedules" used to be its own page; it now lives inside the Host calendar.
+  const rawView = q.get("view") || "host";
   return {
-    view: q.get("view") || "schedules",
+    view: rawView === "schedules" ? "host" : rawView,
     m: q.get("m") || DEFAULT_MEETING,
     p: q.get("p") || "",
     intent: q.get("intent") || "",
@@ -92,7 +94,6 @@ export default function App() {
             : <Register userId={route.u} />
       ) : admin ? (
         <>
-          {view === "schedules" && <Schedules go={go} />}
           {view === "members" && <Members go={go} />}
           {view === "host" && (route.board ? <HostDashboard meetingId={route.m} go={go} /> : <HostCalendar go={go} />)}
         </>
@@ -155,9 +156,8 @@ function Header({ status, view, go, showNav, canLogout, onLogout }) {
       {showNav ? (
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <div style={{ display: "flex", gap: 6, padding: 4, borderRadius: 10, background: "#fff", border: "0.5px solid rgba(0,0,0,.12)", flexWrap: "wrap" }}>
-            {navBtn("schedules", t("nav.schedules"))}
-            {navBtn("members", t("nav.members"))}
             {navBtn("host", t("nav.host"))}
+            {navBtn("members", t("nav.members"))}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <LineDot status={status} />

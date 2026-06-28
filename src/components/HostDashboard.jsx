@@ -12,6 +12,8 @@ export default function HostDashboard({ meetingId, go }) {
   const [sendingCk, setSendingCk] = useState(false);
   const [ckResult, setCkResult] = useState(null);
   const [cancelling, setCancelling] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [sending, setSending] = useState(false);
 
   const load = useCallback(async () => {
     try { setData(await api.getResponses(meetingId)); }
@@ -63,8 +65,31 @@ export default function HostDashboard({ meetingId, go }) {
     try {
       const r = await api.cancelMeeting(meetingId);
       alert(t("host.cancelDone", { pushed: r.pushed, total: r.recipients }));
-      go("host", {}); // back to the calendar; meeting is now in the Deleted folder
+      go("host", {}); // back to the calendar; meeting is now in the Cancelled folder
     } catch (e) { setError(e.message); setCancelling(false); }
+  }
+
+  // Delete the meeting: no LINE notice, just move it to the Deleted folder
+  // (restorable). For schedule occurrences this also keeps it off the calendar.
+  async function deleteMeeting() {
+    if (!confirm(t("host.deleteConfirm", { title: meeting.title }))) return;
+    setDeleting(true); setError("");
+    try {
+      await api.trashMeeting(meetingId);
+      go("host", {}); // back to the calendar; meeting is now in the Deleted folder
+    } catch (e) { setError(e.message); setDeleting(false); }
+  }
+
+  // Send now: manually push this meeting's LINE notice immediately (broadcast to
+  // the OA's followers), regardless of any schedule send window.
+  async function sendNow() {
+    if (!confirm(t("host.sendNowConfirm", { title: meeting.title }))) return;
+    setSending(true); setError("");
+    try {
+      await api.notify(meetingId, "broadcast");
+      alert(t("host.sendNowDone"));
+    } catch (e) { setError(e.message); }
+    finally { setSending(false); }
   }
 
   // Download the attendee responses as a CSV (UTF-8 BOM → opens in Excel).
@@ -112,8 +137,14 @@ export default function HostDashboard({ meetingId, go }) {
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button onClick={() => go("host", { m: meetingId })} style={{ ...btn(false), height: 34, fontSize: 13 }}>{t("host.backToCalendar")}</button>
-            <button onClick={cancelMeeting} disabled={cancelling} style={{ height: 34, fontSize: 13, fontWeight: 500, padding: "0 14px", borderRadius: 8, cursor: cancelling ? "default" : "pointer", border: "none", background: RED, color: "#fff", opacity: cancelling ? 0.6 : 1 }}>
+            <button onClick={cancelMeeting} disabled={cancelling || deleting} style={{ height: 34, fontSize: 13, fontWeight: 500, padding: "0 14px", borderRadius: 8, cursor: cancelling ? "default" : "pointer", border: "none", background: RED, color: "#fff", opacity: cancelling ? 0.6 : 1 }}>
               {cancelling ? t("host.cancelling") : t("host.cancelMeeting")}
+            </button>
+            <button onClick={deleteMeeting} disabled={cancelling || deleting} style={{ ...btn(false), height: 34, fontSize: 13, color: RED, borderColor: RED + "55", opacity: deleting ? 0.6 : 1 }}>
+              {deleting ? t("host.deleting") : t("host.deleteMeeting")}
+            </button>
+            <button onClick={sendNow} disabled={sending || cancelling || deleting} style={{ ...btn(true), height: 34, fontSize: 13, opacity: sending ? 0.6 : 1 }}>
+              {sending ? t("host.sending") : t("host.sendNow")}
             </button>
           </div>
         </div>

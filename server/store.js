@@ -625,16 +625,16 @@ function memberUpcoming(name, fromMs, toMs) {
   return out;
 }
 
-const HOURS_WARNING = 20; // monthly meeting-hours threshold
+const HOURS_WARNING = 20; // meeting-hours threshold over the selected window
 
-// A participant's performance for one month (YYYY-MM), computed over the
-// materialised meeting instances they're on. Resets per month (scoped by date).
-function memberMonthlySummary(name, month) {
+// A participant's performance over an inclusive [fromDate, toDate] window
+// (YYYY-MM-DD), computed over the materialised meeting instances they're on.
+function memberRangeSummary(name, fromDate, toDate) {
   const hm = (s) => { const [h, m] = (s || "").split(":").map(Number); return Number.isFinite(h) ? h + (m || 0) / 60 : 0; };
   const now = Date.now();
   let sessions = 0, occurred = 0, checkedIn = 0, hours = 0, absentNoLeave = 0, onLeave = 0;
   for (const m of listMeetings()) {
-    if (!m.date || !m.date.startsWith(month)) continue;
+    if (!m.date || m.date < fromDate || m.date > toDate) continue;
     const p = m.roster.find((r) => r.name === name);
     if (!p) continue;
     const r = m.responses[p.id];
@@ -648,13 +648,21 @@ function memberMonthlySummary(name, month) {
     }
   }
   return {
-    month, sessions, occurred, checkedIn, onLeave,
+    from: fromDate, to: toDate, sessions, occurred, checkedIn, onLeave,
     hours: Math.round(hours * 10) / 10,
     attendanceRate: occurred ? Math.round((checkedIn / occurred) * 100) : 0,
     absentNoLeave,
     overWarning: hours >= HOURS_WARNING,
     warningHours: HOURS_WARNING,
   };
+}
+
+// Convenience: a whole calendar month (YYYY-MM).
+function memberMonthlySummary(name, month) {
+  const [y, mo] = month.split("-").map(Number);
+  const last = (y && mo) ? new Date(y, mo, 0).getDate() : 31;
+  const to = `${month}-${String(last).padStart(2, "0")}`;
+  return { ...memberRangeSummary(name, `${month}-01`, to), month };
 }
 
 // ── Seed ───────────────────────────────────────────────────────────────
@@ -688,6 +696,7 @@ export {
   persist,
   memberUpcoming,
   memberMonthlySummary,
+  memberRangeSummary,
   scheduleIdOf,
   getStanding,
   setStanding,
