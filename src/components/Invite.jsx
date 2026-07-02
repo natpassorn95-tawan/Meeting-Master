@@ -332,12 +332,12 @@ function AgendaSection({ meetingId, pid, meeting, resp, reload, t, requireIdenti
               <p style={{ margin: "0 0 2px", fontSize: 15, fontWeight: 500 }}>{tp.order}. {tp.title}</p>
               {tp.description ? <p style={{ margin: "0 0 10px", fontSize: 13, color: "var(--color-text-secondary)", lineHeight: 1.5 }}>{tp.description}</p> : <div style={{ height: 6 }} />}
               <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-                {Object.entries(STANCE_META).map(([key, m]) => (
+                {Object.entries(STANCE_META).filter(([key]) => key !== "question").map(([key, m]) => (
                   <button key={key} onClick={() => setDraft(tp.id, { stance: key })} style={{ flex: 1, height: 32, fontSize: 12, borderRadius: 8, cursor: "pointer", border: d.stance === key ? "none" : "0.5px solid rgba(0,0,0,.2)", background: d.stance === key ? m.color : "transparent", color: d.stance === key ? "#fff" : "var(--color-text-primary)" }}>{m.icon} {t(`stance.${key}`)}</button>
                 ))}
               </div>
-              {(d.stance === "comment" || d.stance === "question") ? (
-                <textarea style={{ ...textarea, minHeight: 48 }} value={d.text} onChange={(e) => setDraft(tp.id, { text: e.target.value })} placeholder={d.stance === "question" ? t("agenda.questionPlaceholder") : t("agenda.commentPlaceholder")} />
+              {d.stance === "comment" ? (
+                <textarea style={{ ...textarea, minHeight: 48 }} value={d.text} onChange={(e) => setDraft(tp.id, { text: e.target.value })} placeholder={t("agenda.commentPlaceholder")} />
               ) : null}
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
                 <button onClick={() => save(tp.id)} disabled={savingId === tp.id} style={{ ...btn(false), height: 30, fontSize: 12, padding: "0 14px" }}>{savingId === tp.id ? t("common.saving") : t("common.save")}</button>

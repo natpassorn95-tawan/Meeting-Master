@@ -52,6 +52,13 @@ export default function CheckIn({ meetingId, userId }) {
   const me = data?.responses?.find((r) => r.name === name);
   const checkedIn = (data?.responses || []).filter((r) => r.checkedInAt).sort((a, b) => a.checkedInAt - b.checkedInAt);
   const total = data?.roster?.length || 0;
+  // Check-in is only open during the meeting period (start → end); locked otherwise.
+  const startMs = Date.parse(`${meeting.date}T${meeting.startTime || "00:00"}:00`);
+  const endMs = meeting.endTime ? Date.parse(`${meeting.date}T${meeting.endTime}:00`) : (Number.isFinite(startMs) ? startMs + 2 * 3600 * 1000 : NaN);
+  const now = Date.now();
+  const notStarted = Number.isFinite(startMs) && now < startMs;
+  const ended = Number.isFinite(endMs) && now > endMs;
+  const open = !notStarted && !ended;
 
   return (
     <Shell>
@@ -62,10 +69,27 @@ export default function CheckIn({ meetingId, userId }) {
           <div style={{ fontSize: 13, opacity: 0.95, marginTop: 4 }}>{meeting.datetime}{meeting.location ? `・${meeting.location}` : ""}</div>
         </div>
         <div style={{ padding: "18px" }}>
-          {!name ? (
+          {(ended || notStarted) && !me?.checkedInAt ? (
+            <div style={{ textAlign: "center", padding: "0.5rem 0" }}>
+              <div style={{ width: 56, height: 56, borderRadius: "50%", background: "rgba(0,0,0,.06)", color: "#888", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, margin: "0 auto 12px" }}>🔒</div>
+              <p style={{ margin: "0 0 4px", fontSize: 16, fontWeight: 500 }}>{ended ? t("checkin.closed") : t("checkin.notOpen")}</p>
+              <p style={{ margin: 0, fontSize: 13, color: "var(--color-text-secondary)" }}>{meeting.datetime}</p>
+            </div>
+          ) : !name ? (
             <>
               <p style={{ margin: "0 0 10px", fontSize: 14, color: "var(--color-text-secondary)" }}>{t("checkin.whoAreYou")}</p>
-              <input style={input} value={draft} onChange={(e) => setDraft(e.target.value)} placeholder={t("manage.name")} />
+              {data?.roster?.length ? (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+                  {data.roster.map((p) => (
+                    <button key={p.id} onClick={() => { try { localStorage.setItem(NAME_KEY, p.name); } catch { /* ignore */ } setName(p.name); }}
+                      style={{ height: 38, padding: "0 16px", fontSize: 14, fontWeight: 500, borderRadius: 999, cursor: "pointer", border: "0.5px solid rgba(0,0,0,.25)", background: "transparent", color: "var(--color-text-primary)" }}>
+                      {p.name}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--color-text-tertiary,#999)" }}>{t("checkin.notListed")}</p>
+              <input style={input} value={draft} onChange={(e) => setDraft(e.target.value)} placeholder={t("manage.name")} onKeyDown={(e) => { if (e.key === "Enter") { const n = draft.trim(); if (n) { localStorage.setItem(NAME_KEY, n); setName(n); } } }} />
               <div style={{ height: 12 }} />
               <button onClick={() => { const n = draft.trim(); if (n) { localStorage.setItem(NAME_KEY, n); setName(n); } }} disabled={!draft.trim()} style={{ ...btn(true), width: "100%", opacity: draft.trim() ? 1 : 0.4 }}>{t("mymeetings.continue")}</button>
             </>

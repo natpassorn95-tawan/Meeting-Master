@@ -57,6 +57,7 @@ export const api = {
   markAgendaRead: (id, pid) => post(`/meetings/${id}/participant/${pid}/agenda-read`),
   checkin: (id, name) => post(`/meetings/${id}/checkin`, { name }),
   sendCheckin: (id) => post(`/meetings/${id}/send-checkin`),
+  checkinLink: (id) => req(`/meetings/${id}/checkin-link`),
   setComment: (id, pid, topicId, stance, text) =>
     post(`/meetings/${id}/participant/${pid}/comments`, { topicId, stance, text }),
 
@@ -73,5 +74,6 @@ export const api = {
   listMembers: () => req("/members"),
   getMember: (userId) => req(`/members/${encodeURIComponent(userId)}`),
   registerMember: (userId, body) => post(`/members/${encodeURIComponent(userId)}/register`, body),
+  setMemberActive: (userId, active) => patch(`/members/${encodeURIComponent(userId)}`, { active }),
   simulateFollow: (userId) => post("/members/simulate-follow", { userId }),
 };

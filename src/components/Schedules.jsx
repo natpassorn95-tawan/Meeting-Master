@@ -151,7 +151,7 @@ export function CreateForm({ dates = [], onCreated, onClose, setError }) {
   useEffect(() => {
     api.listMembers()
       .then((ms) => {
-        const p = ms.filter((m) => m.status === "registered").map((m) => ({
+        const p = ms.filter((m) => m.status === "registered" && m.active !== false).map((m) => ({
           id: m.lineUserId, name: m.name, dept: m.employeeId || "—", lineUserId: m.lineUserId,
         }));
         setPool(p);

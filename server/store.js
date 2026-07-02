@@ -101,18 +101,19 @@ function getMember(userId) {
 function upsertPendingMember(userId) {
   if (!store.members[userId]) {
     store.members[userId] = {
-      lineUserId: userId, name: "", employeeId: "", email: "", jobTitle: "",
-      status: "pending", createdAt: Date.now(), registeredAt: null,
+      lineUserId: userId, name: "", employeeId: "", email: "", jobTitle: "", department: "",
+      status: "pending", active: true, createdAt: Date.now(), registeredAt: null,
     };
   }
   return store.members[userId];
 }
-function registerMember(userId, { name, employeeId, email, jobTitle }) {
+function registerMember(userId, { name, employeeId, email, jobTitle, department }) {
   const m = upsertPendingMember(userId);
   m.name = (name || "").trim();
   m.employeeId = (employeeId || "").trim();
   m.email = (email || "").trim();
   m.jobTitle = (jobTitle || "").trim();
+  m.department = (department || "").trim();
   m.status = "registered";
   m.registeredAt = Date.now();
   if (m.name) linkLineUser(m.name, userId); // bind userId onto matching roster entries
@@ -124,6 +125,14 @@ function listMembers() {
 function deleteMember(userId) {
   delete store.members[userId];
 }
+// Mark an employee active (still with the company) or inactive (left / suspended).
+// Inactive members are kept for history but excluded from new meeting recipients.
+function setMemberActive(userId, active) {
+  const m = store.members[userId];
+  if (!m) return null;
+  m.active = !!active;
+  return m;
+}
 
 function blankResponse(p) {
   return {
@@ -134,6 +143,7 @@ function blankResponse(p) {
     rsvp: null, // "yes" | "leave"
     leaveReason: null, // { type, text }
     agendaReadAt: null,
+    checkinSentAt: null, // when the check-in button was pushed to them (dedupe)
     checkedInAt: null, // timestamp when they checked in at meeting start
     comments: {}, // { [topicId]: { stance, text, at } }
     updatedAt: null,
@@ -706,5 +716,6 @@ export {
   registerMember,
   listMembers,
   deleteMember,
+  setMemberActive,
   seed,
 };

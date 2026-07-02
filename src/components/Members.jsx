@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { api } from "../api.js";
-import { ACCENT, GREEN, AMBER, card, btn, pill, avatar, jobTitleLabel } from "../ui.js";
+import { ACCENT, GREEN, AMBER, card, btn, pill, avatar, jobTitleLabel, departmentLabel } from "../ui.js";
 import { useT } from "../i18n.jsx";
 
 export default function Members({ go }) {
@@ -26,6 +26,12 @@ export default function Members({ go }) {
       load();
     } catch (e) { setError(e.message); }
     finally { setBusy(false); }
+  }
+
+  async function setActive(userId, active) {
+    setError("");
+    try { await api.setMemberActive(userId, active); load(); }
+    catch (e) { setError(e.message); }
   }
 
   return (
@@ -55,13 +61,15 @@ export default function Members({ go }) {
             {members.map((m, i) => {
               const a = avatar(m.name || "?", i);
               const reg = m.status === "registered";
+              const inactive = m.active === false;
               return (
-                <div key={m.lineUserId} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderTop: i === 0 ? "none" : "0.5px solid rgba(0,0,0,.08)" }}>
+                <div key={m.lineUserId} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderTop: i === 0 ? "none" : "0.5px solid rgba(0,0,0,.08)", opacity: inactive ? 0.55 : 1 }}>
                   <div style={a.wrap}>{a.letter}</div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <p style={{ margin: 0, fontSize: 15, fontWeight: 500 }}>
                       {m.name || <span style={{ color: "var(--color-text-tertiary,#999)" }}>—</span>}
                       {m.employeeId ? <span style={{ fontSize: 12, color: "var(--color-text-secondary)", marginLeft: 8 }}>{m.employeeId}</span> : null}
+                      {m.department ? <span style={{ fontSize: 12, color: "var(--color-text-secondary)", marginLeft: 8 }}>{departmentLabel(m.department, lang)}</span> : null}
                       {m.jobTitle ? <span style={{ fontSize: 12, color: ACCENT, marginLeft: 8 }}>{jobTitleLabel(m.jobTitle, lang)}</span> : null}
                     </p>
                     <p style={{ margin: 0, fontSize: 12, color: "var(--color-text-secondary)" }}>
@@ -71,7 +79,19 @@ export default function Members({ go }) {
                   {reg
                     ? <span style={pill("#E1F5EE", GREEN)}>{t("members.statusRegistered")}</span>
                     : <span style={pill("#FFF6E5", AMBER)}>{t("members.statusPending")}</span>}
-                  {!reg ? <button onClick={() => go("register", { u: m.lineUserId })} style={{ ...btn(false), height: 28, fontSize: 11, padding: "0 10px" }}>{t("members.openForm")}</button> : null}
+                  {reg ? (
+                    <select
+                      value={inactive ? "inactive" : "active"}
+                      onChange={(e) => setActive(m.lineUserId, e.target.value === "active")}
+                      title={t("members.employmentStatus")}
+                      style={{ height: 30, fontSize: 12, padding: "0 8px", borderRadius: 8, appearance: "auto", cursor: "pointer", border: "0.5px solid rgba(0,0,0,.25)", background: "#fff", color: inactive ? "#993556" : "var(--color-text-primary)" }}
+                    >
+                      <option value="active">🟢 {t("members.active")}</option>
+                      <option value="inactive">⚫ {t("members.inactive")}</option>
+                    </select>
+                  ) : (
+                    <button onClick={() => go("register", { u: m.lineUserId })} style={{ ...btn(false), height: 28, fontSize: 11, padding: "0 10px" }}>{t("members.openForm")}</button>
+                  )}
                 </div>
               );
             })}

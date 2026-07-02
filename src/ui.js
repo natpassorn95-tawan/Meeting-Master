@@ -149,6 +149,35 @@ export function jobTitleLabel(zh, lang) {
   return lang === "en" ? (j?.en || zh) : zh;
 }
 
+// Departments (部門) for member registration — from Aiai's department list
+// (department.xlsx, 17 entries). Stored value is the Chinese name; `en` shows in
+// English mode. Proper-noun units keep their name romanized.
+export const DEPARTMENTS = [
+  { zh: "人力資源管理組", en: "Human Resources" },
+  { zh: "印照", en: "Yin-Zhao" },
+  { zh: "愛力勇", en: "Aili-Yong" },
+  { zh: "數位智能組", en: "Digital Intelligence" },
+  { zh: "東明部", en: "Dongming Division" },
+  { zh: "照護部", en: "Care Division" },
+  { zh: "社區整合型服務中心", en: "Community Integrated Service Center" },
+  { zh: "社工組", en: "Social Work" },
+  { zh: "管理中心", en: "Management Center" },
+  { zh: "系統應用組", en: "System Application" },
+  { zh: "總務管理組", en: "General Affairs" },
+  { zh: "膳食組", en: "Catering / Dietary" },
+  { zh: "護理人員", en: "Nursing" },
+  { zh: "財務管理組", en: "Finance" },
+  { zh: "運務管理組", en: "Logistics" },
+  { zh: "醫事組", en: "Medical Affairs" },
+  { zh: "院長室", en: "Superintendent's Office" },
+];
+
+// Localized label for a stored (Chinese) department value.
+export function departmentLabel(zh, lang) {
+  const d = DEPARTMENTS.find((x) => x.zh === zh);
+  return lang === "en" ? (d?.en || zh) : zh;
+}
+
 export const STANCE_META = {
   none: { label: "無意見", icon: "✅", color: GREEN },
   comment: { label: "有意見", icon: "🗨", color: ACCENT },

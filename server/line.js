@@ -132,6 +132,56 @@ export function buildNoticeFlex(meeting, baseUrl = "") {
   };
 }
 
+// Keyword cheat-sheet as a Flex card — clearer than a wall of text. Each entry
+// shows an icon + plain-language title, a short description, and the exact words
+// to type (in a highlighted pill).
+export function buildKeywordGuideMessage() {
+  const entry = (icon, title, desc, keys) => ({
+    type: "box", layout: "vertical", spacing: "xs", margin: "lg",
+    contents: [
+      { type: "text", text: `${icon}  ${title}`, weight: "bold", size: "sm", color: "#1B1A2B" },
+      { type: "text", text: desc, size: "xs", color: "#8A8896", wrap: true },
+      { type: "box", layout: "vertical", backgroundColor: "#ECEAF7", cornerRadius: "8px",
+        paddingAll: "8px", margin: "sm",
+        contents: [
+          { type: "text", text: "輸入 Type", size: "xxs", color: "#908DA6" },
+          { type: "text", text: keys, size: "sm", color: ACCENT, weight: "bold", wrap: true, margin: "xs" },
+        ] },
+    ],
+  });
+  const sep = { type: "separator", margin: "lg", color: "#EDEBF2" };
+  return {
+    type: "flex",
+    altText: "會議大師 常用關鍵字：我的會議 / register / 關鍵字 / admin",
+    contents: {
+      type: "bubble",
+      header: {
+        type: "box", layout: "vertical", backgroundColor: ACCENT, paddingAll: "16px",
+        contents: [
+          { type: "text", text: "📖 常用關鍵字", color: "#FFFFFF", weight: "bold", size: "lg" },
+          { type: "text", text: "在對話框輸入下列文字即可開啟功能", color: "#DAD7F2", size: "xs", margin: "sm", wrap: true },
+        ],
+      },
+      body: {
+        type: "box", layout: "vertical", paddingAll: "16px", spacing: "none",
+        contents: [
+          entry("🗓", "我的會議 My Meetings", "查看會議、確認出席 / 請假、個人統計",
+                "我的會議 · mymeetings · 請假 · leave · rsvp · 改期 · 更新"),
+          sep,
+          entry("📝", "修改個人資料 Update profile", "重新填寫 姓名 / 部門 / 職位",
+                "register · new · 註冊 · 改名"),
+          sep,
+          entry("❓", "使用說明 Help", "再次顯示這份關鍵字說明",
+                "關鍵字 · 說明 · help · keyword · 指令 · 功能 · 使用說明"),
+          sep,
+          entry("🛠", "管理者後台 Admin（僅限管理者）", "取得後台連結與通行碼",
+                "admin · 管理 · 後台 · 管理者 · 主持人後台"),
+        ],
+      },
+    },
+  };
+}
+
 // Wrap a Flex bubble as a LINE "flex" message with alt text (shown in the
 // chat list / on devices that can't render Flex).
 export function buildNoticeMessage(meeting, baseUrl = "") {

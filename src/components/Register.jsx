@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { api } from "../api.js";
-import { ACCENT, GREEN, RED, card, label, input, btn, JOB_TITLES, jobTitleLabel } from "../ui.js";
+import { ACCENT, GREEN, RED, card, label, input, btn, JOB_TITLES, jobTitleLabel, DEPARTMENTS, departmentLabel } from "../ui.js";
 import { useT } from "../i18n.jsx";
 import { liffConfigured, getLiffProfile } from "../liff.js";
 
@@ -10,7 +10,7 @@ export default function Register({ userId: userIdProp }) {
   const { t, lang } = useT();
   const [userId, setUserId] = useState(userIdProp || "");
   const [member, setMember] = useState(null);
-  const [f, setF] = useState({ name: "", employeeId: "", email: "", jobTitle: "" });
+  const [f, setF] = useState({ name: "", employeeId: "", email: "", jobTitle: "", department: "" });
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [alreadyReg, setAlreadyReg] = useState(false);
@@ -28,7 +28,7 @@ export default function Register({ userId: userIdProp }) {
       setMember(m);
       if (m.status === "registered") {
         // Prefill but keep the form editable so they can change their name/details.
-        setF({ name: m.name, employeeId: m.employeeId, email: m.email, jobTitle: m.jobTitle || "" });
+        setF({ name: m.name, employeeId: m.employeeId, email: m.email, jobTitle: m.jobTitle || "", department: m.department || "" });
         setAlreadyReg(true);
       }
     }).catch(() => {});
@@ -36,7 +36,7 @@ export default function Register({ userId: userIdProp }) {
 
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const emailOk = /\S+@\S+\.\S+/.test(f.email);
-  const canSubmit = f.name.trim() && f.employeeId.trim() && emailOk && f.jobTitle.trim() && !busy;
+  const canSubmit = f.name.trim() && f.employeeId.trim() && emailOk && f.jobTitle.trim() && f.department.trim() && !busy;
 
   async function submit() {
     setError(""); setBusy(true);
@@ -62,7 +62,7 @@ export default function Register({ userId: userIdProp }) {
             <div style={{ textAlign: "center", padding: "1rem 0" }}>
               <div style={{ width: 56, height: 56, borderRadius: "50%", background: "#E1F5EE", color: GREEN, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, margin: "0 auto 16px" }}>✓</div>
               <p style={{ margin: "0 0 6px", fontSize: 16, fontWeight: 500 }}>{alreadyReg ? t("register.already") : t("register.done")}</p>
-              <p style={{ margin: 0, fontSize: 14, color: "var(--color-text-secondary)" }}>{f.name}・{f.employeeId}{f.jobTitle ? `・${jobTitleLabel(f.jobTitle, lang)}` : ""}</p>
+              <p style={{ margin: 0, fontSize: 14, color: "var(--color-text-secondary)" }}>{f.name}・{f.employeeId}{f.department ? `・${departmentLabel(f.department, lang)}` : ""}{f.jobTitle ? `・${jobTitleLabel(f.jobTitle, lang)}` : ""}</p>
               <p style={{ margin: "2px 0 0", fontSize: 13, color: "var(--color-text-tertiary,#999)" }}>{f.email}</p>
             </div>
           ) : (
@@ -73,6 +73,12 @@ export default function Register({ userId: userIdProp }) {
               <div style={{ height: 14 }} />
               <label style={label}>{t("register.employeeId")}</label>
               <input style={input} value={f.employeeId} onChange={set("employeeId")} placeholder={t("register.employeeIdPlaceholder")} />
+              <div style={{ height: 14 }} />
+              <label style={label}>{t("register.department")}</label>
+              <select style={{ ...input, appearance: "auto" }} value={f.department} onChange={set("department")}>
+                <option value="" disabled>{t("register.departmentPlaceholder")}</option>
+                {DEPARTMENTS.map((d) => <option key={d.zh} value={d.zh}>{lang === "en" ? d.en : d.zh}</option>)}
+              </select>
               <div style={{ height: 14 }} />
               <label style={label}>{t("register.jobTitle")}</label>
               <select style={{ ...input, appearance: "auto" }} value={f.jobTitle} onChange={set("jobTitle")}>

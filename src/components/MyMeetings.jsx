@@ -117,7 +117,7 @@ export default function MyMeetings({ userId }) {
         <div style={card}><p style={{ margin: 0, fontSize: 14, color: "var(--color-text-tertiary,#999)" }}>{t("mymeetings.none")}</p></div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {items.map((it) => <Row key={keyOf(it)} it={it} t={t} lang={lang} busy={busyKey === keyOf(it)} onSet={setRsvp} />)}
+          {items.map((it) => <Row key={keyOf(it)} it={it} t={t} lang={lang} busy={busyKey === keyOf(it)} onSet={setRsvp} userId={userId} />)}
         </div>
       )}
 
@@ -154,7 +154,7 @@ function Stat({ n, label, color, sub }) {
   );
 }
 
-function Row({ it, t, lang, busy, onSet }) {
+function Row({ it, t, lang, busy, onSet, userId }) {
   const isLeave = it.rsvp === "leave";
   const isYes = it.rsvp === "yes";
   const [reason, setReason] = useState(it.leaveReason?.type || LEAVE_TYPES[0]);
@@ -162,6 +162,12 @@ function Row({ it, t, lang, busy, onSet }) {
   // Fall back to end-of-day when there's no end time so an ongoing day isn't locked.
   const endMs = Date.parse(`${it.date}T${it.endTime || it.startTime || "23:59"}:00`);
   const past = Number.isFinite(endMs) && endMs < Date.now();
+  // Check-in window: strictly the meeting period (start → end). When it's open
+  // and the person has confirmed, offer an in-app check-in button.
+  const startMs = Date.parse(`${it.date}T${it.startTime || "00:00"}:00`);
+  const endFull = it.endTime ? Date.parse(`${it.date}T${it.endTime}:00`) : (Number.isFinite(startMs) ? startMs + 2 * 3600 * 1000 : NaN);
+  const checkinOpen = Number.isFinite(startMs) && Date.now() >= startMs && Number.isFinite(endFull) && Date.now() <= endFull;
+  const checkinHref = it.meetingId ? `/?view=checkin&m=${encodeURIComponent(it.meetingId)}${userId ? `&u=${encodeURIComponent(userId)}` : ""}` : null;
   const optBtn = (active, color, text, onClick) => (
     <button onClick={onClick} disabled={busy} style={{ flex: 1, height: 38, fontSize: 13, fontWeight: 500, borderRadius: 8, cursor: "pointer", border: active ? "none" : "0.5px solid rgba(0,0,0,.2)", background: active ? color : "transparent", color: active ? "#fff" : "var(--color-text-primary)", opacity: busy ? 0.6 : 1 }}>{text}</button>
   );
@@ -177,6 +183,9 @@ function Row({ it, t, lang, busy, onSet }) {
         {fmtDateTimeI18n(it.date, it.startTime, it.endTime, lang)}
         {it.recurring ? <span style={{ marginLeft: 6, fontSize: 12, color: "var(--color-text-tertiary,#999)" }}>🔁 {t("mymeetings.nextOccurrence")}</span> : null}
       </p>
+      {checkinOpen && isYes && checkinHref ? (
+        <a href={checkinHref} style={{ display: "block", textAlign: "center", height: 46, lineHeight: "46px", borderRadius: 8, background: GREEN, color: "#fff", fontSize: 15, fontWeight: 600, textDecoration: "none", marginBottom: past ? 0 : 12 }}>🙋 {t("checkin.button")}</a>
+      ) : null}
       {past ? (
         <p style={{ margin: 0, fontSize: 13, color: "var(--color-text-tertiary,#999)" }}>🔒 {t("mymeetings.passed")}</p>
       ) : (

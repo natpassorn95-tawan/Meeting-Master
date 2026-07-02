@@ -1,4 +1,5 @@
 import express from "express";
+import QRCode from "qrcode";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +10,7 @@ import {
   buildMyMeetingsMessage,
   buildCheckinMessage,
   buildCancelMessage,
+  buildKeywordGuideMessage,
   getBotInfo,
   getQuota,
   broadcast,
@@ -35,6 +37,11 @@ const BASE_URL = process.env.PUBLIC_BASE_URL || "http://localhost:5273";
 const REGISTER_KEYWORDS = ["new", "改名", "註冊", "register"];
 // …and these open "My Meetings" to confirm / take leave per occurrence.
 const MEETING_KEYWORDS = ["請假", "leave", "rsvp", "我的會議", "改期", "更新", "mymeetings"];
+// …and these reply with the CURRENT admin console link (the public URL can
+// change when the tunnel restarts, so this always returns the live one).
+const ADMIN_KEYWORDS = ["admin", "管理", "後台", "管理者", "主持人後台"];
+// …and these re-send the keyword cheat-sheet (also pushed right after register).
+const HELP_KEYWORDS = ["關鍵字", "說明", "help", "keyword", "指令", "功能", "使用說明"];
 
 db.loadStore(); // restore persisted data (members, schedules, meetings…)
 db.seed();      // seeds the empty meeting only if nothing was loaded
@@ -261,21 +268,29 @@ app.get("/api/meetings/:id/participant/:pid", (req, res) => {
 app.post("/api/meetings/:id/participant/:pid/rsvp", (req, res) => {
   const { value, leaveReason } = req.body || {};
   if (!["yes", "leave"].includes(value)) return res.status(400).json({ error: "value must be yes|leave" });
+  const mm = db.getMeeting(req.params.id);
+  if (mm && meetingEnded(mm)) return res.status(409).json({ error: "meeting has ended; attendance is locked", code: "meeting_locked" });
   const r = db.setRsvp(req.params.id, req.params.pid, value, leaveReason);
   if (!r) return res.status(404).json({ error: "not found" });
   // Confirming a recurring occurrence sets the standing default for the schedule.
   if (value === "yes") { const sid = db.scheduleIdOf(req.params.id); if (sid) db.setStanding(sid, r.name, "yes"); }
   res.json(r);
+  // If they confirm after check-in has opened, send them the check-in button now.
+  if (value === "yes") maybeSendCheckinTo(req.params.id, req.params.pid).catch(() => {});
 });
 
 app.post("/api/meetings/:id/participant/:pid/agenda-read", (req, res) => {
   const r = db.markAgendaRead(req.params.id, req.params.pid);
   if (!r) return res.status(404).json({ error: "not found" });
   res.json(r);
+  // Reading the agenda also makes them check-in-eligible → push it if now open.
+  maybeSendCheckinTo(req.params.id, req.params.pid).catch(() => {});
 });
 
 app.post("/api/meetings/:id/participant/:pid/comments", (req, res) => {
   const { topicId, stance, text } = req.body || {};
+  const mm = db.getMeeting(req.params.id);
+  if (mm && meetingEnded(mm)) return res.status(409).json({ error: "meeting has ended; comments are locked", code: "meeting_locked" });
   const r = db.setComment(req.params.id, req.params.pid, topicId, stance, text);
   if (!r) return res.status(400).json({ error: "invalid topic or participant" });
   res.json(r);
@@ -286,6 +301,10 @@ app.post("/api/meetings/:id/participant/:pid/comments", (req, res) => {
 app.post("/api/meetings/:id/checkin", (req, res) => {
   const name = String(req.body?.name || "").trim();
   if (!name) return res.status(400).json({ error: "name required" });
+  const m = db.getMeeting(req.params.id);
+  if (!m) return res.status(404).json({ error: "meeting not found" });
+  // Check-in is only allowed during the meeting period; locked before/after.
+  if (!checkinOpen(m)) return res.status(409).json({ error: "check-in is only open during the meeting", code: "checkin_closed" });
   const p = db.addParticipant(req.params.id, { name });
   if (!p) return res.status(404).json({ error: "meeting not found" });
   const r = db.checkIn(req.params.id, p.id);
@@ -303,10 +322,50 @@ async function sendCheckin(meeting) {
   let pushed = 0, skipped = 0;
   for (const p of meeting.roster) {
     if (!/^U[0-9a-f]{32}$/.test(p.lineUserId || "")) { skipped++; continue; }
-    if (!eligibleForCheckin(meeting.responses[p.id])) { skipped++; continue; } // not confirmed & not read agenda → skip
-    try { await pushTo(p.lineUserId, [buildCheckinMessage(meeting, BASE_URL, p.lineUserId)]); pushed++; } catch { /* keep going */ }
+    const r = meeting.responses[p.id];
+    if (!eligibleForCheckin(r)) { skipped++; continue; } // not confirmed & not read agenda → skip
+    try { await pushTo(p.lineUserId, [buildCheckinMessage(meeting, BASE_URL, p.lineUserId)]); pushed++; if (r) r.checkinSentAt = Date.now(); } catch { /* keep going */ }
   }
   return { pushed, skipped };
+}
+
+// Is a meeting's check-in window open? Strictly the meeting period: from its
+// start time until its end time. Outside that window everything is locked.
+function checkinOpen(meeting) {
+  if (!meeting?.date || !meeting.startTime) return false;
+  const startMs = Date.parse(`${meeting.date}T${meeting.startTime}:00`);
+  if (Number.isNaN(startMs)) return false;
+  const endMs = meeting.endTime ? Date.parse(`${meeting.date}T${meeting.endTime}:00`) : startMs + CHECKIN_WINDOW_MS;
+  const now = Date.now();
+  return now >= startMs && now <= endMs; // during the meeting period only
+}
+
+// Has a meeting ended? Once past its end time, attendance is locked (no edits).
+function meetingEnded(meeting) {
+  if (!meeting?.date) return false;
+  const endMs = meeting.endTime
+    ? Date.parse(`${meeting.date}T${meeting.endTime}:00`)
+    : Date.parse(`${meeting.date}T23:59:59`);
+  return Number.isFinite(endMs) && Date.now() > endMs;
+}
+
+// When a late attendee confirms / reads the agenda AFTER check-in has opened,
+// push them the check-in button right then (once). This is why check-in stays
+// gated on "confirm or read agenda": doing either re-triggers the button.
+async function maybeSendCheckinTo(meetingId, participantId) {
+  if (!LINE_CONFIGURED) return;
+  const m = db.getMeeting(meetingId);
+  if (!m || !checkinOpen(m)) return;
+  const r = m.responses[participantId];
+  if (!r || !eligibleForCheckin(r)) return;         // must be confirmed or agenda-read
+  if (r.checkedInAt || r.checkinSentAt) return;       // already checked in / already sent
+  if (!/^U[0-9a-f]{32}$/.test(r.lineUserId || "")) return;
+  try {
+    await pushTo(r.lineUserId, [buildCheckinMessage(m, BASE_URL, r.lineUserId)]);
+    r.checkinSentAt = Date.now();
+    db.persist();
+    console.log(`[checkin] re-sent to ${r.name} on ${meetingId} (became eligible)`);
+  } catch (e) { console.error("[checkin] re-send failed", e.message); }
 }
 
 // Manual trigger (host "send check-in now" button).
@@ -315,6 +374,28 @@ app.post("/api/meetings/:id/send-checkin", async (req, res) => {
   if (!m) return res.status(404).json({ error: "meeting not found" });
   const r = await sendCheckin(m);
   res.json({ ok: true, ...r, recipients: m.roster.length });
+});
+
+// Shared check-in URL for a meeting (anyone in the room can open it and check
+// in — even people who never confirmed / read the agenda, and walk-ins).
+function checkinUrl(meetingId) {
+  return `${(BASE_URL || "").replace(/\/$/, "")}/?view=checkin&m=${encodeURIComponent(meetingId)}`;
+}
+app.get("/api/meetings/:id/checkin-link", (req, res) => {
+  if (!db.getMeeting(req.params.id)) return res.status(404).json({ error: "meeting not found" });
+  res.json({ url: checkinUrl(req.params.id) });
+});
+// Same link as a scannable QR (SVG) — encodes the public URL so phones can open it.
+app.get("/api/meetings/:id/checkin-qr.svg", async (req, res) => {
+  if (!db.getMeeting(req.params.id)) return res.status(404).json({ error: "meeting not found" });
+  try {
+    const svg = await QRCode.toString(checkinUrl(req.params.id), {
+      type: "svg", margin: 1, color: { dark: "#1B1A2B", light: "#FFFFFF" },
+    });
+    res.setHeader("Content-Type", "image/svg+xml");
+    res.setHeader("Cache-Control", "no-store");
+    res.send(svg);
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── My Meetings: a participant manages attendance across occurrences ───
@@ -365,12 +446,20 @@ app.post("/api/my-meetings/rsvp", (req, res) => {
   }
   const sid = scheduleId || db.scheduleIdOf(meetingId);
 
+  // Lock attendance once the specific occurrence has ended (future dates stay editable).
+  const candId = meetingId || (sid && /^\d{4}-\d{2}-\d{2}$/.test(occKey || "") ? `${sid}__${occKey}` : null);
+  if (candId) { const cm = db.getMeeting(candId); if (cm && meetingEnded(cm)) return res.status(409).json({ error: "meeting has ended; attendance is locked", code: "meeting_locked" }); }
+
   if (value === "yes") {
     if (sid) {
       db.setStanding(sid, name, "yes"); // default: attend all future occurrences
-      // clear any explicit override on this date so it follows the default again
+      // Also confirm the materialised instance directly so it shows on the host
+      // dashboard and unlocks check-in (which is gated on confirm / agenda-read).
       const mId = meetingId || (occKey ? `${sid}__${occKey}` : null);
-      if (mId && db.getMeeting(mId)) { const p = db.addParticipant(mId, { name }); if (p) db.setRsvp(mId, p.id, null); }
+      if (mId && db.getMeeting(mId)) {
+        const p = db.addParticipant(mId, { name });
+        if (p) { db.setRsvp(mId, p.id, "yes"); maybeSendCheckinTo(mId, p.id).catch(() => {}); }
+      }
       return res.json({ ok: true, scheduleId: sid, standing: "yes" });
     }
     if (meetingId) {
@@ -434,6 +523,20 @@ app.post("/api/line/webhook", async (req, res) => {
           try { await replyMessage(ev.replyToken, [buildMyMeetingsMessage(BASE_URL, userId)]); }
           catch (e) { console.error("[webhook] reply failed", e.message); }
         }
+      } else if (ADMIN_KEYWORDS.includes(text)) {
+        // Keyword to fetch the CURRENT admin console link (live URL + passcode).
+        if (LINE_CONFIGURED && ev.replyToken) {
+          const adminUrl = `${BASE_URL}/?view=host`;
+          const msg = { type: "text", text: `🛠 會議大師 管理者後台 Admin console\n\n${adminUrl}\n\n通行碼 Passcode：aiai` };
+          try { await replyMessage(ev.replyToken, [msg]); }
+          catch (e) { console.error("[webhook] reply failed", e.message); }
+        }
+      } else if (HELP_KEYWORDS.includes(text)) {
+        // Keyword to re-show the keyword cheat-sheet (Flex card).
+        if (LINE_CONFIGURED && ev.replyToken) {
+          try { await replyMessage(ev.replyToken, [buildKeywordGuideMessage()]); }
+          catch (e) { console.error("[webhook] reply failed", e.message); }
+        }
       }
     }
   }
@@ -449,12 +552,29 @@ app.get("/api/members/:userId", (req, res) => {
 
 // Complete registration from the web form linked in the welcome message.
 app.post("/api/members/:userId/register", (req, res) => {
-  const { name, employeeId, email, jobTitle } = req.body || {};
+  const { name, employeeId, email, jobTitle, department } = req.body || {};
   if (!String(name || "").trim()) return res.status(400).json({ error: "name is required" });
   if (!String(employeeId || "").trim()) return res.status(400).json({ error: "employeeId is required" });
   if (!String(email || "").trim()) return res.status(400).json({ error: "email is required" });
   if (!String(jobTitle || "").trim()) return res.status(400).json({ error: "jobTitle is required" });
-  res.json(db.registerMember(req.params.userId, { name, employeeId, email, jobTitle }));
+  if (!String(department || "").trim()) return res.status(400).json({ error: "department is required" });
+  const m = db.registerMember(req.params.userId, { name, employeeId, email, jobTitle, department });
+  res.json(m);
+  // After registering, push the keyword cheat-sheet so the member knows how to
+  // start (fire-and-forget; only to a real, bound LINE userId).
+  const uid = req.params.userId;
+  if (LINE_CONFIGURED && /^U[0-9a-f]{32}$/.test(uid)) {
+    const welcome = { type: "text", text: `✅ 註冊完成，歡迎加入會議大師，${m.name}！\n輸入「關鍵字」可隨時查看以下常用功能。` };
+    pushTo(uid, [welcome, buildKeywordGuideMessage()]).catch((e) => console.error("[register] push failed", e.message));
+  }
+});
+
+// Set a member's employment status: active (with the company) or inactive.
+app.patch("/api/members/:userId", (req, res) => {
+  if (typeof req.body?.active !== "boolean") return res.status(400).json({ error: "active (boolean) required" });
+  const m = db.setMemberActive(req.params.userId, req.body.active);
+  if (!m) return res.status(404).json({ error: "member not found" });
+  res.json(m);
 });
 
 app.delete("/api/members/:userId", (req, res) => {

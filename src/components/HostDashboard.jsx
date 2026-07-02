@@ -14,6 +14,9 @@ export default function HostDashboard({ meetingId, go }) {
   const [cancelling, setCancelling] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [sending, setSending] = useState(false);
+  const [showQR, setShowQR] = useState(false);
+  const [checkinUrl, setCheckinUrl] = useState("");
+  const [copied, setCopied] = useState(false);
 
   const load = useCallback(async () => {
     try { setData(await api.getResponses(meetingId)); }
@@ -56,6 +59,18 @@ export default function HostDashboard({ meetingId, go }) {
     try { setCkResult(await api.sendCheckin(meetingId)); }
     catch (e) { setError(e.message); }
     finally { setSendingCk(false); load(); }
+  }
+
+  async function toggleQR() {
+    const next = !showQR; setShowQR(next);
+    if (next && !checkinUrl) {
+      try { const r = await api.checkinLink(meetingId); setCheckinUrl(r.url); }
+      catch { setCheckinUrl(`${window.location.origin}/?view=checkin&m=${meetingId}`); }
+    }
+  }
+  function copyLink() {
+    const url = checkinUrl || `${window.location.origin}/?view=checkin&m=${meetingId}`;
+    navigator.clipboard?.writeText(url).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }).catch(() => {});
   }
 
   // Cancel the meeting: notify attendees on LINE, then it moves to the trash.
@@ -168,8 +183,23 @@ export default function HostDashboard({ meetingId, go }) {
             <button onClick={remind} disabled={reminding} style={{ ...btn(false), height: 32, fontSize: 12 }}>
               {reminding ? t("host.reminding") : t("host.remind")}
             </button>
+            <button onClick={toggleQR} style={{ ...btn(showQR), height: 32, fontSize: 12 }}>📷 {t("host.checkinQR")}</button>
           </div>
         </div>
+        {showQR ? (
+          <div style={{ marginBottom: 14, padding: "16px", border: "0.5px dashed " + ACCENT + "66", borderRadius: 12, background: ACCENT + "08" }}>
+            <p style={{ margin: "0 0 12px", fontSize: 13, color: "var(--color-text-secondary)", textAlign: "center" }}>{t("host.checkinQRDesc")}</p>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+              <div style={{ width: 240, height: 240, padding: 12, background: "#fff", border: "0.5px solid rgba(0,0,0,.12)", borderRadius: 12 }}>
+                <img src={`/api/meetings/${encodeURIComponent(meetingId)}/checkin-qr.svg`} alt="check-in QR" style={{ width: "100%", height: "100%", display: "block" }} />
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "center", maxWidth: "100%" }}>
+                <code style={{ fontSize: 12, color: "var(--color-text-secondary)", wordBreak: "break-all" }}>{checkinUrl || "…"}</code>
+                <button onClick={copyLink} style={{ ...btn(false), height: 30, fontSize: 12 }}>{copied ? t("host.copied") : t("host.copyLink")}</button>
+              </div>
+            </div>
+          </div>
+        ) : null}
         {ckResult ? (
           <div style={{ marginBottom: 12, padding: "0.6rem 0.9rem", background: "#E1F5EE", color: GREEN, borderRadius: 8, fontSize: 13 }}>
             {t("host.checkinSent", { pushed: ckResult.pushed, total: ckResult.recipients })}
