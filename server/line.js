@@ -204,12 +204,47 @@ export function buildReminderMessage(meeting, baseUrl = "") {
 }
 
 // Cancellation notice — sent to attendees when the host cancels a meeting.
-export function buildCancelMessage(meeting) {
+// Flex card sent when a meeting is cancelled (crimson) or deleted (grey).
+function buildRemovalMessage(meeting, { deleted } = {}) {
+  const title = meeting.title || "（未命名會議）";
+  const datetime = meeting.datetime || "—";
+  const location = meeting.location || "";
+  const host = meeting.host || "";
+  const color = deleted ? "#6B6880" : "#993556";
+  const heading = deleted ? "🗑 會議已取消" : "⚠️ 會議取消通知";
+  const msg = deleted
+    ? "此會議已取消（移除），您無需出席。"
+    : "此會議已取消，您無需出席。造成不便，敬請見諒。";
+  const row = (label, value) => ({
+    type: "box", layout: "baseline", spacing: "sm",
+    contents: [
+      { type: "text", text: label, color: "#999999", size: "sm", flex: 2 },
+      { type: "text", text: value, color: "#333333", size: "sm", flex: 5, wrap: true },
+    ],
+  });
+  const rows = [row("時間 Time", datetime)];
+  if (location) rows.push(row("地點 Venue", location));
+  if (host) rows.push(row("主持 Host", host));
+  rows.push({ type: "separator", margin: "lg", color: "#EEEEEE" });
+  rows.push({ type: "text", text: msg, size: "sm", color, weight: "bold", wrap: true, margin: "lg" });
   return {
-    type: "text",
-    text: `⚠️ 會議取消通知\n${meeting.title || "會議"}\n${meeting.datetime || ""}\n\n此會議已取消，您無需出席。造成不便敬請見諒。`,
+    type: "flex",
+    altText: `${deleted ? "會議已取消" : "會議取消通知"}｜${title}｜${datetime}`.slice(0, 400),
+    contents: {
+      type: "bubble",
+      header: {
+        type: "box", layout: "vertical", backgroundColor: color, paddingAll: "16px",
+        contents: [
+          { type: "text", text: heading, color: "#FFFFFF", weight: "bold", size: "sm" },
+          { type: "text", text: title, color: "#FFFFFF", weight: "bold", size: "lg", wrap: true, margin: "sm", decoration: "line-through" },
+        ],
+      },
+      body: { type: "box", layout: "vertical", spacing: "md", paddingAll: "16px", contents: rows },
+    },
   };
 }
+export function buildCancelMessage(meeting) { return buildRemovalMessage(meeting, { deleted: false }); }
+export function buildDeleteMessage(meeting) { return buildRemovalMessage(meeting, { deleted: true }); }
 
 // Welcome + registration prompt sent when someone first adds the OA.
 // Links to the web form that collects Name / Employee ID / Email.

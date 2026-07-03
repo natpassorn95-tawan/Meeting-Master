@@ -19,20 +19,6 @@ const DEFAULT_MEETING = "M202607";
 // Host calendar page, so there's no separate Schedules view.)
 const ADMIN_VIEWS = new Set(["members", "host"]);
 const PARTICIPANT_VIEWS = new Set(["invite", "register", "mymeetings", "checkin"]);
-// Admin passcode — lets the admin unlock the console on any device (e.g. phone).
-// Configurable via VITE_ADMIN_CODE; client-side gate (keeps participants out, not
-// cryptographic security).
-const ADMIN_CODE = import.meta.env.VITE_ADMIN_CODE || "aiai";
-
-function isAdminHost() {
-  if (typeof window === "undefined") return true;
-  const h = window.location.hostname;
-  return (
-    h === "localhost" || h === "127.0.0.1" || h === "::1" ||
-    /^192\.168\./.test(h) || /^10\./.test(h) ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(h)
-  );
-}
 
 function readUrl() {
   const q = new URLSearchParams(window.location.search);
@@ -51,8 +37,13 @@ function readUrl() {
 export default function App() {
   const [route, setRoute] = useState(readUrl);
   const [status, setStatus] = useState(null);
-  const [authed, setAuthed] = useState(() => {
-    try { return localStorage.getItem("mm_admin") === "1"; } catch { return false; }
+  // Console identity: who is using the console (chosen from the member list).
+  // Their lineUserId scopes what they see (private meetings) and can edit.
+  const [user, setUser] = useState(() => {
+    try {
+      const id = localStorage.getItem("mm_user");
+      return id ? { id, name: localStorage.getItem("mm_user_name") || id } : null;
+    } catch { return null; }
   });
 
   useEffect(() => {
@@ -72,18 +63,24 @@ export default function App() {
     setRoute(readUrl());
   }
 
-  // Admin console is available on the operator's own machine/LAN, or on any
-  // device (phone) once unlocked with the passcode. Participants never log in.
-  const admin = isAdminHost() || authed;
+  // The console requires a chosen identity; participants never log in.
+  const admin = !!user;
   const view = route.view;
   const isParticipant = PARTICIPANT_VIEWS.has(view);
   const showNav = admin && !isParticipant;
-  const narrow = isParticipant || !admin; // participant + login screens are narrow
-  const logout = () => { try { localStorage.removeItem("mm_admin"); } catch { /* ignore */ } setAuthed(false); };
+  const narrow = isParticipant || !admin; // participant + picker screens are narrow
+  const switchUser = () => {
+    try { localStorage.removeItem("mm_user"); localStorage.removeItem("mm_user_name"); } catch { /* ignore */ }
+    setUser(null);
+  };
+  const pickUser = (m) => {
+    try { localStorage.setItem("mm_user", m.lineUserId); localStorage.setItem("mm_user_name", m.name || m.lineUserId); } catch { /* ignore */ }
+    setUser({ id: m.lineUserId, name: m.name || m.lineUserId });
+  };
 
   return (
     <div style={{ maxWidth: narrow ? 520 : 880, margin: "0 auto", padding: "0.5rem 0 2rem" }}>
-      <Header status={status} view={view} go={go} showNav={showNav} canLogout={authed && !isAdminHost()} onLogout={logout} />
+      <Header status={status} view={view} go={go} showNav={showNav} userName={admin ? user.name : ""} onSwitch={switchUser} />
       {isParticipant ? (
         view === "invite"
           ? <Invite meetingId={route.m} participantId={route.p} intent={route.intent} go={go} />
@@ -98,42 +95,55 @@ export default function App() {
           {view === "host" && (route.board ? <HostDashboard meetingId={route.m} go={go} /> : <HostCalendar go={go} />)}
         </>
       ) : (
-        <AdminLogin onAuthed={() => setAuthed(true)} />
+        <IdentityPicker onPick={pickUser} />
       )}
     </div>
   );
 }
 
-function AdminLogin({ onAuthed }) {
+// Console sign-in: pick your name from the registered members (their LINE
+// userId becomes the identity token). Not cryptographic — an internal-tool gate.
+function IdentityPicker({ onPick }) {
   const { t } = useT();
-  const [code, setCode] = useState("");
-  const [err, setErr] = useState(false);
-  function submit() {
-    if (code === ADMIN_CODE) {
-      try { localStorage.setItem("mm_admin", "1"); } catch { /* ignore */ }
-      onAuthed();
-    } else { setErr(true); }
-  }
+  const [members, setMembers] = useState(null);
+  const [q, setQ] = useState("");
+  useEffect(() => {
+    api.listMembers()
+      .then((ms) => setMembers(ms.filter((m) => m.status === "registered" && m.active !== false)))
+      .catch(() => setMembers([]));
+  }, []);
+  const query = q.trim().toLowerCase();
+  const list = (members || []).filter((m) => !query || `${m.name} ${m.employeeId || ""}`.toLowerCase().includes(query));
   return (
-    <div style={{ maxWidth: 360, margin: "10vh auto 0" }}>
+    <div style={{ maxWidth: 420, margin: "8vh auto 0" }}>
       <div style={{ background: "#fff", border: "0.5px solid rgba(0,0,0,.12)", borderRadius: 12, padding: "1.5rem" }}>
-        <h2 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 600 }}>{t("admin.loginTitle")}</h2>
-        <p style={{ margin: "0 0 16px", fontSize: 13, color: "var(--color-text-secondary)" }}>{t("admin.loginDesc")}</p>
-        <input
-          type="password" value={code} autoFocus
-          onChange={(e) => { setCode(e.target.value); setErr(false); }}
-          onKeyDown={(e) => e.key === "Enter" && submit()}
-          placeholder={t("admin.passcode")}
-          style={{ width: "100%", height: 44, padding: "0 12px", fontSize: 16, borderRadius: 8, border: "0.5px solid rgba(0,0,0,.3)", boxSizing: "border-box" }}
-        />
-        {err ? <p style={{ margin: "8px 0 0", fontSize: 13, color: "#993556" }}>⚠ {t("admin.wrong")}</p> : null}
-        <button onClick={submit} style={{ marginTop: 16, width: "100%", height: 44, fontSize: 15, fontWeight: 500, border: "none", borderRadius: 8, background: ACCENT, color: "#fff", cursor: "pointer" }}>{t("admin.login")}</button>
+        <h2 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 600 }}>{t("identity.title")}</h2>
+        <p style={{ margin: "0 0 16px", fontSize: 13, color: "var(--color-text-secondary)" }}>{t("identity.desc")}</p>
+        {members === null ? (
+          <p style={{ fontSize: 14, color: "var(--color-text-secondary)" }}>{t("common.loading")}</p>
+        ) : members.length === 0 ? (
+          <p style={{ fontSize: 14, color: "var(--color-text-tertiary,#999)" }}>{t("identity.none")}</p>
+        ) : (
+          <>
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("identity.search")}
+              style={{ width: "100%", height: 40, padding: "0 12px", fontSize: 15, borderRadius: 8, border: "0.5px solid rgba(0,0,0,.3)", boxSizing: "border-box", marginBottom: 10 }} />
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 340, overflowY: "auto" }}>
+              {list.map((m) => (
+                <button key={m.lineUserId} onClick={() => onPick(m)}
+                  style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2, padding: "10px 14px", borderRadius: 8, border: "0.5px solid rgba(0,0,0,.18)", background: "#fff", cursor: "pointer", textAlign: "left" }}>
+                  <span style={{ fontSize: 15, fontWeight: 600 }}>{m.name}</span>
+                  <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>{[m.employeeId, m.department].filter(Boolean).join(" · ")}</span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
 }
 
-function Header({ status, view, go, showNav, canLogout, onLogout }) {
+function Header({ status, view, go, showNav, userName, onSwitch }) {
   const { t, lang, setLang } = useT();
   const navBtn = (key, text) => (
     <button onClick={() => go(key)} style={{
@@ -161,7 +171,11 @@ function Header({ status, view, go, showNav, canLogout, onLogout }) {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <LineDot status={status} />
-            {canLogout ? <button onClick={onLogout} style={{ height: 30, padding: "0 10px", fontSize: 12, borderRadius: 7, border: "0.5px solid rgba(0,0,0,.2)", background: "transparent", cursor: "pointer", color: "var(--color-text-secondary)" }}>{t("admin.logout")}</button> : null}
+            {userName ? (
+              <button onClick={onSwitch} title={t("identity.switch")} style={{ height: 30, padding: "0 10px", fontSize: 12, borderRadius: 7, border: "0.5px solid rgba(0,0,0,.2)", background: "transparent", cursor: "pointer", color: "var(--color-text-secondary)", whiteSpace: "nowrap" }}>
+                👤 {userName} ⇄
+              </button>
+            ) : null}
           </div>
         </div>
       ) : null}

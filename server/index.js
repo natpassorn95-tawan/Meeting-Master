@@ -10,6 +10,7 @@ import {
   buildMyMeetingsMessage,
   buildCheckinMessage,
   buildCancelMessage,
+  buildDeleteMessage,
   buildKeywordGuideMessage,
   getBotInfo,
   getQuota,
@@ -101,35 +102,71 @@ app.get("/api/line/status", async (_req, res) => {
   }
 });
 
+// ── Access control (per-user visibility) ────────────────────────────────
+// The console user identifies via the `x-mm-user` header (their LINE userId,
+// chosen from the member list). Public meetings are visible to everyone;
+// private ones only to the creator + invited recipients. NOTE: the header is
+// client-supplied — this scopes access for an internal tool, it is not
+// cryptographic authentication.
+function currentUser(req) { return String(req.get("x-mm-user") || "").trim(); }
+function invitedIds(obj) {
+  const ids = new Set();
+  if (Array.isArray(obj?.recipientIds)) obj.recipientIds.forEach((x) => ids.add(x));
+  (obj?.roster || []).forEach((p) => { if (p.lineUserId) ids.add(p.lineUserId); });
+  // A materialised occurrence (id "schedule__date") inherits its schedule's
+  // current invited recipients, so inviting someone later takes effect.
+  const sid = obj?.id && obj.id.includes("__") ? obj.id.slice(0, obj.id.indexOf("__")) : null;
+  if (sid) { const s = db.getSchedule(sid); if (s && Array.isArray(s.recipientIds)) s.recipientIds.forEach((x) => ids.add(x)); }
+  return [...ids];
+}
+function canSee(obj, uid) {
+  if (!obj) return false;
+  if (obj.visibility !== "private") return true;              // public / legacy → everyone
+  if (obj.creatorId && obj.creatorId === uid) return true;    // the creator
+  return invitedIds(obj).includes(uid);                        // an invited recipient
+}
+function canEdit(obj, uid) {
+  if (!obj) return false;
+  if (!obj.creatorId) return true;          // legacy (no creator) → anyone can manage
+  return obj.creatorId === uid;             // otherwise only the creator
+}
+
 // ── Meetings ─────────────────────────────────────────────────────────
-app.get("/api/meetings", (_req, res) => res.json(db.listMeetings()));
+app.get("/api/meetings", (req, res) => res.json(db.listMeetings().filter((m) => canSee(m, currentUser(req)))));
 
 app.post("/api/meetings", (req, res) => {
   const { title } = req.body || {};
   if (!String(title || "").trim()) return res.status(400).json({ error: "title is required" });
-  res.status(201).json(db.createMeeting(req.body));
+  res.status(201).json(db.createMeeting({ ...req.body, creatorId: currentUser(req) || req.body?.creatorId || null }));
 });
 
 // ── Deleted folder (Schedules page) + Cancelled folder (Host page) ──────
 // "deleted"/"cancelled" GET routes are registered before "/:id" so they
 // aren't matched as a meeting id.
 // Deleted: schedules the admin deleted (their occurrences land here).
-app.get("/api/meetings/deleted", (_req, res) => res.json(db.listDeleted()));
+app.get("/api/meetings/deleted", (req, res) => res.json(db.listDeleted().filter((m) => canSee(m, currentUser(req)))));
 // Cancelled: meetings the host cancelled from the dashboard.
-app.get("/api/meetings/cancelled", (_req, res) => res.json(db.listCancelled()));
+app.get("/api/meetings/cancelled", (req, res) => res.json(db.listCancelled().filter((m) => canSee(m, currentUser(req)))));
 
 app.post("/api/meetings/:id/trash", (req, res) => {
+  const existing = db.getMeeting(req.params.id);
+  if (existing && !canEdit(existing, currentUser(req))) return res.status(403).json({ error: "only the creator can delete this meeting", code: "not_owner" });
+  // Delete is silent cleanup — no LINE notice to attendees (unlike Cancel).
   const m = db.trashMeeting(req.params.id);
   if (!m) return res.status(404).json({ error: "meeting not found" });
   res.json(m);
 });
 
 app.post("/api/meetings/:id/restore", (req, res) => {
+  const bucketed = db.listDeleted().find((x) => x.id === req.params.id);
+  if (bucketed && !canEdit(bucketed, currentUser(req))) return res.status(403).json({ error: "only the creator can restore this meeting", code: "not_owner" });
   const m = db.restoreMeeting(req.params.id);
   if (!m) return res.status(404).json({ error: "not in trash" });
   res.json(m);
 });
 app.post("/api/meetings/:id/restore-cancelled", (req, res) => {
+  const bucketed = db.listCancelled().find((x) => x.id === req.params.id);
+  if (bucketed && !canEdit(bucketed, currentUser(req))) return res.status(403).json({ error: "only the creator can restore this meeting", code: "not_owner" });
   const m = db.restoreCancelled(req.params.id);
   if (!m) return res.status(404).json({ error: "not in cancelled" });
   res.json(m);
@@ -137,10 +174,14 @@ app.post("/api/meetings/:id/restore-cancelled", (req, res) => {
 
 // Permanent delete (purge from the deleted or cancelled folder).
 app.delete("/api/meetings/:id", (req, res) => {
+  const bucketed = db.listDeleted().find((x) => x.id === req.params.id);
+  if (bucketed && !canEdit(bucketed, currentUser(req))) return res.status(403).json({ error: "only the creator can delete this meeting", code: "not_owner" });
   if (!db.purgeMeeting(req.params.id)) return res.status(404).json({ error: "not in trash" });
   res.status(204).end();
 });
 app.delete("/api/meetings/:id/cancelled", (req, res) => {
+  const bucketed = db.listCancelled().find((x) => x.id === req.params.id);
+  if (bucketed && !canEdit(bucketed, currentUser(req))) return res.status(403).json({ error: "only the creator can delete this meeting", code: "not_owner" });
   if (!db.purgeCancelled(req.params.id)) return res.status(404).json({ error: "not in cancelled" });
   res.status(204).end();
 });
@@ -148,24 +189,58 @@ app.delete("/api/meetings/:id/cancelled", (req, res) => {
 app.get("/api/meetings/:id", (req, res) => {
   const m = db.getMeeting(req.params.id);
   if (!m) return res.status(404).json({ error: "meeting not found" });
+  const uid = currentUser(req);
+  if (uid && !canSee(m, uid)) return res.status(403).json({ error: "not visible to you", code: "not_visible" });
   res.json(m);
 });
 
 // Admin maintenance: edit meeting basics / agenda / roster (responses kept).
+// Creator-only.
 app.patch("/api/meetings/:id/meta", (req, res) => {
-  const m = db.updateMeetingMeta(req.params.id, req.body || {});
-  if (!m) return res.status(404).json({ error: "meeting not found" });
-  res.json(m);
+  const existing = db.getMeeting(req.params.id);
+  if (!existing) return res.status(404).json({ error: "meeting not found" });
+  if (!canEdit(existing, currentUser(req))) return res.status(403).json({ error: "only the creator can edit this meeting", code: "not_owner" });
+  res.json(db.updateMeetingMeta(req.params.id, req.body || {}));
 });
 app.put("/api/meetings/:id/topics", (req, res) => {
-  const m = db.setTopics(req.params.id, req.body?.topics);
-  if (!m) return res.status(404).json({ error: "meeting not found" });
-  res.json(m);
+  const existing = db.getMeeting(req.params.id);
+  if (!existing) return res.status(404).json({ error: "meeting not found" });
+  if (!canEdit(existing, currentUser(req))) return res.status(403).json({ error: "only the creator can edit this meeting", code: "not_owner" });
+  res.json(db.setTopics(req.params.id, req.body?.topics));
 });
 app.put("/api/meetings/:id/roster", (req, res) => {
-  const m = db.setRoster(req.params.id, req.body?.roster);
+  const existing = db.getMeeting(req.params.id);
+  if (!existing) return res.status(404).json({ error: "meeting not found" });
+  if (!canEdit(existing, currentUser(req))) return res.status(403).json({ error: "only the creator can edit this meeting", code: "not_owner" });
+  res.json(db.setRoster(req.params.id, req.body?.roster));
+});
+
+// Invite attendees to an existing meeting (creator-only). Adds them to the
+// roster (so they get notices + can see a private meeting) and to the parent
+// schedule's invite list, then pushes them the meeting notice.
+app.post("/api/meetings/:id/invite", async (req, res) => {
+  const m = db.getMeeting(req.params.id);
   if (!m) return res.status(404).json({ error: "meeting not found" });
-  res.json(m);
+  if (!canEdit(m, currentUser(req))) return res.status(403).json({ error: "only the creator can invite", code: "not_owner" });
+  const members = Array.isArray(req.body?.members) ? req.body.members : [];
+  const sid = db.scheduleIdOf(m.id);
+  let added = 0;
+  const toNotify = [];
+  for (const mem of members) {
+    const name = String(mem?.name || "").trim();
+    if (!name) continue;
+    const p = db.addParticipant(m.id, { name, dept: mem.dept, lineUserId: mem.lineUserId });
+    if (!p) continue;
+    added++;
+    if (sid) db.addScheduleInvitee(sid, { name, dept: mem.dept, lineUserId: mem.lineUserId });
+    if (/^U[0-9a-f]{32}$/.test(mem.lineUserId || "")) toNotify.push(mem.lineUserId);
+  }
+  let pushed = 0;
+  if (LINE_CONFIGURED && toNotify.length) {
+    const msg = [buildNoticeMessage(m, BASE_URL)];
+    for (const uid of toNotify) { try { await pushTo(uid, msg); pushed++; } catch { /* keep going */ } }
+  }
+  res.json({ ok: true, added, pushed });
 });
 
 // Auto-enroll a (registered) participant into a meeting so the LINE buttons can
@@ -180,6 +255,8 @@ app.post("/api/meetings/:id/enroll", (req, res) => {
 app.get("/api/meetings/:id/responses", (req, res) => {
   const m = db.getMeeting(req.params.id);
   if (!m) return res.status(404).json({ error: "meeting not found" });
+  const uid = currentUser(req);
+  if (uid && !canSee(m, uid)) return res.status(403).json({ error: "not visible to you", code: "not_visible" });
   res.json({
     meeting: { id: m.id, title: m.title, datetime: m.datetime, location: m.location, host: m.host },
     topics: m.topics,
@@ -240,6 +317,7 @@ app.post("/api/meetings/:id/remind-unread", async (req, res) => {
 app.post("/api/meetings/:id/cancel", async (req, res) => {
   const m = db.getMeeting(req.params.id);
   if (!m) return res.status(404).json({ error: "meeting not found" });
+  if (!canEdit(m, currentUser(req))) return res.status(403).json({ error: "only the creator can cancel this meeting", code: "not_owner" });
   let pushed = 0, recipients = 0;
   if (LINE_CONFIGURED) {
     const msg = [buildCancelMessage(m)];
@@ -275,16 +353,12 @@ app.post("/api/meetings/:id/participant/:pid/rsvp", (req, res) => {
   // Confirming a recurring occurrence sets the standing default for the schedule.
   if (value === "yes") { const sid = db.scheduleIdOf(req.params.id); if (sid) db.setStanding(sid, r.name, "yes"); }
   res.json(r);
-  // If they confirm after check-in has opened, send them the check-in button now.
-  if (value === "yes") maybeSendCheckinTo(req.params.id, req.params.pid).catch(() => {});
 });
 
 app.post("/api/meetings/:id/participant/:pid/agenda-read", (req, res) => {
   const r = db.markAgendaRead(req.params.id, req.params.pid);
   if (!r) return res.status(404).json({ error: "not found" });
   res.json(r);
-  // Reading the agenda also makes them check-in-eligible → push it if now open.
-  maybeSendCheckinTo(req.params.id, req.params.pid).catch(() => {});
 });
 
 app.post("/api/meetings/:id/participant/:pid/comments", (req, res) => {
@@ -311,6 +385,21 @@ app.post("/api/meetings/:id/checkin", (req, res) => {
   res.json({ ok: true, checkedInAt: r.checkedInAt });
 });
 
+// Check-out: allowed from start until end + 1 hour (must have checked in first).
+app.post("/api/meetings/:id/checkout", (req, res) => {
+  const name = String(req.body?.name || "").trim();
+  if (!name) return res.status(400).json({ error: "name required" });
+  const m = db.getMeeting(req.params.id);
+  if (!m) return res.status(404).json({ error: "meeting not found" });
+  if (!checkoutOpen(m)) return res.status(409).json({ error: "check-out is closed (past the meeting + 1 hour)", code: "checkout_closed" });
+  const p = db.addParticipant(req.params.id, { name });
+  if (!p) return res.status(404).json({ error: "meeting not found" });
+  const r = db.getResponse(req.params.id, p.id);
+  if (!r?.checkedInAt) return res.status(409).json({ error: "please check in first", code: "not_checked_in" });
+  const out = db.checkOut(req.params.id, p.id);
+  res.json({ ok: true, checkedOutAt: out.checkedOutAt });
+});
+
 // Push the check-in prompt to a meeting's recipients (personalised per user).
 // Only to engaged attendees: confirmed OR read the agenda, and not on leave.
 // Someone who neither confirmed nor read the agenda gets no check-in.
@@ -323,7 +412,10 @@ async function sendCheckin(meeting) {
   for (const p of meeting.roster) {
     if (!/^U[0-9a-f]{32}$/.test(p.lineUserId || "")) { skipped++; continue; }
     const r = meeting.responses[p.id];
-    if (!eligibleForCheckin(r)) { skipped++; continue; } // not confirmed & not read agenda → skip
+    // Everyone on the roster — including the host/creator if they're a recipient
+    // — is treated the same: pushed only if they confirmed or read the agenda,
+    // and not on leave.
+    if (!eligibleForCheckin(r)) { skipped++; continue; }
     try { await pushTo(p.lineUserId, [buildCheckinMessage(meeting, BASE_URL, p.lineUserId)]); pushed++; if (r) r.checkinSentAt = Date.now(); } catch { /* keep going */ }
   }
   return { pushed, skipped };
@@ -338,6 +430,16 @@ function checkinOpen(meeting) {
   const endMs = meeting.endTime ? Date.parse(`${meeting.date}T${meeting.endTime}:00`) : startMs + CHECKIN_WINDOW_MS;
   const now = Date.now();
   return now >= startMs && now <= endMs; // during the meeting period only
+}
+
+// Check-out window: from start until end + 1 hour (a grace hour after the meeting).
+function checkoutOpen(meeting) {
+  if (!meeting?.date || !meeting.startTime) return false;
+  const startMs = Date.parse(`${meeting.date}T${meeting.startTime}:00`);
+  if (Number.isNaN(startMs)) return false;
+  const endMs = meeting.endTime ? Date.parse(`${meeting.date}T${meeting.endTime}:00`) : startMs + CHECKIN_WINDOW_MS;
+  const now = Date.now();
+  return now >= startMs && now <= endMs + 60 * 60 * 1000; // start → end + 1h
 }
 
 // Has a meeting ended? Once past its end time, attendance is locked (no edits).
@@ -434,6 +536,7 @@ function materializeOccurrence(scheduleId, occKey) {
   const m = db.getMeeting(`${scheduleId}__${occKey}`) || db.createMeeting({
     id: `${scheduleId}__${occKey}`, title: s.title, date: occKey, startTime: s.startTime, endTime: s.endTime,
     location: s.location, host: s.host, topics: s.topics, attachments: s.attachments || [], roster: recipients,
+    visibility: s.visibility, creatorId: s.creatorId,
   });
   db.applyStanding(m.id, scheduleId);
   return m;
@@ -458,7 +561,7 @@ app.post("/api/my-meetings/rsvp", (req, res) => {
       const mId = meetingId || (occKey ? `${sid}__${occKey}` : null);
       if (mId && db.getMeeting(mId)) {
         const p = db.addParticipant(mId, { name });
-        if (p) { db.setRsvp(mId, p.id, "yes"); maybeSendCheckinTo(mId, p.id).catch(() => {}); }
+        if (p) db.setRsvp(mId, p.id, "yes");
       }
       return res.json({ ok: true, scheduleId: sid, standing: "yes" });
     }
@@ -527,7 +630,7 @@ app.post("/api/line/webhook", async (req, res) => {
         // Keyword to fetch the CURRENT admin console link (live URL + passcode).
         if (LINE_CONFIGURED && ev.replyToken) {
           const adminUrl = `${BASE_URL}/?view=host`;
-          const msg = { type: "text", text: `🛠 會議大師 管理者後台 Admin console\n\n${adminUrl}\n\n通行碼 Passcode：aiai` };
+          const msg = { type: "text", text: `🛠 會議大師 管理者後台 Admin console\n\n${adminUrl}\n\n開啟後請選擇您的姓名登入 / Open and pick your name to sign in.` };
           try { await replyMessage(ev.replyToken, [msg]); }
           catch (e) { console.error("[webhook] reply failed", e.message); }
         }
@@ -618,6 +721,7 @@ async function fireSchedule(s, { live = true } = {}) {
     topics: s.topics,
     attachments: s.attachments || [],
     roster: recipients,
+    visibility: s.visibility, creatorId: s.creatorId,
   });
   db.applyStanding(meeting.id, s.id); // reflect standing confirmations on this instance
 
@@ -653,9 +757,11 @@ app.get("/api/calendar", (req, res) => {
   const toMs = Date.parse(`${to}T23:59:59`);
   if (Number.isNaN(fromMs) || Number.isNaN(toMs)) return res.status(400).json({ error: "from/to required (YYYY-MM-DD)" });
 
+  const uid = currentUser(req);
   const events = [];
   for (const m of db.listMeetings()) {
     if (!m.date) continue;
+    if (!canSee(m, uid)) continue; // private meetings only for creator + invited
     const ms = Date.parse(`${m.date}T00:00:00`);
     if (ms >= fromMs && ms <= toMs) {
       events.push({ type: "meeting", id: m.id, date: m.date, title: m.title, startTime: m.startTime, endTime: m.endTime, location: m.location, count: m.roster.length });
@@ -663,6 +769,7 @@ app.get("/api/calendar", (req, res) => {
   }
   for (const s of db.listSchedules()) {
     if (!s.enabled) continue;
+    if (!canSee(s, uid)) continue; // private schedules only for creator + invited
     for (const occ of db.occurrencesInRange(s, fromMs, toMs)) {
       const occKey = db.ymd(occ);
       const occId = `${s.id}__${occKey}`;
@@ -679,6 +786,8 @@ app.get("/api/calendar", (req, res) => {
 app.post("/api/schedules/:id/materialize", (req, res) => {
   const s = db.getSchedule(req.params.id);
   if (!s) return res.status(404).json({ error: "schedule not found" });
+  const uid = currentUser(req);
+  if (uid && !canSee(s, uid)) return res.status(403).json({ error: "not visible to you", code: "not_visible" });
   const occKey = String(req.body?.occKey || "");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(occKey)) return res.status(400).json({ error: "occKey (YYYY-MM-DD) required" });
   const meetingId = `${s.id}__${occKey}`;
@@ -688,13 +797,14 @@ app.post("/api/schedules/:id/materialize", (req, res) => {
     m = db.createMeeting({
       id: meetingId, title: s.title, date: occKey, startTime: s.startTime, endTime: s.endTime,
       location: s.location, host: s.host, topics: s.topics, attachments: s.attachments || [], roster: recipients,
+      visibility: s.visibility, creatorId: s.creatorId,
     });
   }
   db.applyStanding(m.id, s.id);
   res.json(m);
 });
 
-app.get("/api/schedules", (_req, res) => res.json(db.listSchedules()));
+app.get("/api/schedules", (req, res) => res.json(db.listSchedules().filter((s) => canSee(s, currentUser(req)))));
 
 app.post("/api/schedules", async (req, res) => {
   if (!String(req.body?.title || "").trim()) return res.status(400).json({ error: "title is required" });
@@ -702,7 +812,12 @@ app.post("/api/schedules", async (req, res) => {
   if (endTime && startTime && startTime >= endTime) {
     return res.status(400).json({ error: "start time must be before end time" });
   }
-  const s = db.createSchedule(req.body);
+  // Stamp the creator from the console identity; auto-invite them so they see it
+  // and receive notices (creator + invited).
+  const creatorId = currentUser(req) || null;
+  const recipientIds = Array.isArray(req.body?.recipientIds) ? [...req.body.recipientIds] : [];
+  if (creatorId && !recipientIds.includes(creatorId)) recipientIds.push(creatorId);
+  const s = db.createSchedule({ ...req.body, creatorId, recipientIds });
 
   // Notify the selected recipients immediately on creation (next occurrence).
   // Mark that occurrence's lead windows as already fired so the background
@@ -722,12 +837,15 @@ app.post("/api/schedules", async (req, res) => {
 });
 
 app.patch("/api/schedules/:id", (req, res) => {
-  const s = db.updateSchedule(req.params.id, req.body || {});
-  if (!s) return res.status(404).json({ error: "schedule not found" });
-  res.json(s);
+  const existing = db.getSchedule(req.params.id);
+  if (!existing) return res.status(404).json({ error: "schedule not found" });
+  if (!canEdit(existing, currentUser(req))) return res.status(403).json({ error: "only the creator can edit this schedule", code: "not_owner" });
+  res.json(db.updateSchedule(req.params.id, req.body || {}));
 });
 
 app.delete("/api/schedules/:id", (req, res) => {
+  const existing = db.getSchedule(req.params.id);
+  if (existing && !canEdit(existing, currentUser(req))) return res.status(403).json({ error: "only the creator can delete this schedule", code: "not_owner" });
   db.deleteSchedule(req.params.id);
   res.status(204).end();
 });
@@ -736,6 +854,7 @@ app.delete("/api/schedules/:id", (req, res) => {
 app.post("/api/schedules/:id/run-now", async (req, res) => {
   const s = db.getSchedule(req.params.id);
   if (!s) return res.status(404).json({ error: "schedule not found" });
+  if (!canEdit(s, currentUser(req))) return res.status(403).json({ error: "only the creator can run this schedule", code: "not_owner" });
   const result = await fireSchedule(s, { live: true });
   res.json({ ok: !result.error, ...result });
 });
@@ -751,9 +870,9 @@ async function tick() {
   for (const real of db.listSchedules().map((s) => db.getSchedule(s.id)).filter(Boolean)) {
     if (!real.enabled) continue;
 
-    // Check-in: when an occurrence has just started, send the check-in button
-    // once. Computed FIRST and independently of future occurrences, so one-time
-    // meetings (no "next" occurrence after they start) still trigger.
+    // Check-in: when an occurrence has just started, push the check-in button
+    // once to attendees who CONFIRMED or READ THE AGENDA (eligibleForCheckin).
+    // Non-responders aren't pushed — they find check-in in 我的會議 / My Meetings.
     const recent = db.occurrencesInRange(real, now - CHECKIN_WINDOW_MS, now);
     const started = recent.length ? recent[recent.length - 1] : null;
     if (started) {

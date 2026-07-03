@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { api } from "../api.js";
 import { card, btn, pill, avatar, GREEN, RED, ACCENT, AMBER, STANCE_META } from "../ui.js";
 import { useT } from "../i18n.jsx";
+import { RecipientPicker } from "./Schedules.jsx";
 
 export default function HostDashboard({ meetingId, go }) {
   const { t, lang } = useT();
@@ -9,14 +10,16 @@ export default function HostDashboard({ meetingId, go }) {
   const [error, setError] = useState("");
   const [reminding, setReminding] = useState(false);
   const [remindResult, setRemindResult] = useState(null);
-  const [sendingCk, setSendingCk] = useState(false);
-  const [ckResult, setCkResult] = useState(null);
   const [cancelling, setCancelling] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [sending, setSending] = useState(false);
   const [showQR, setShowQR] = useState(false);
   const [checkinUrl, setCheckinUrl] = useState("");
   const [copied, setCopied] = useState(false);
+  const [showInvite, setShowInvite] = useState(false);
+  const [pool, setPool] = useState(null);      // registered members for the invite picker
+  const [inviteSel, setInviteSel] = useState([]); // selected lineUserIds
+  const [inviting, setInviting] = useState(false);
 
   const load = useCallback(async () => {
     try { setData(await api.getResponses(meetingId)); }
@@ -54,13 +57,6 @@ export default function HostDashboard({ meetingId, go }) {
     finally { setReminding(false); load(); }
   }
 
-  async function sendCheckin() {
-    setSendingCk(true); setCkResult(null);
-    try { setCkResult(await api.sendCheckin(meetingId)); }
-    catch (e) { setError(e.message); }
-    finally { setSendingCk(false); load(); }
-  }
-
   async function toggleQR() {
     const next = !showQR; setShowQR(next);
     if (next && !checkinUrl) {
@@ -71,6 +67,27 @@ export default function HostDashboard({ meetingId, go }) {
   function copyLink() {
     const url = checkinUrl || `${window.location.origin}/?view=checkin&m=${meetingId}`;
     navigator.clipboard?.writeText(url).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }).catch(() => {});
+  }
+
+  async function toggleInvite() {
+    const next = !showInvite; setShowInvite(next); setInviteSel([]);
+    if (next && pool === null) {
+      try { setPool((await api.listMembers()).filter((m) => m.status === "registered" && m.active !== false)); }
+      catch { setPool([]); }
+    }
+  }
+  async function submitInvite(availPool) {
+    const members = availPool.filter((m) => inviteSel.includes(m.lineUserId))
+      .map((m) => ({ name: m.name, dept: m.dept, lineUserId: m.lineUserId }));
+    if (!members.length) return;
+    setInviting(true); setError("");
+    try {
+      const r = await api.inviteToMeeting(meetingId, members);
+      setShowInvite(false); setInviteSel([]);
+      await load();
+      alert(t("host.inviteDone", { added: r.added, pushed: r.pushed }));
+    } catch (e) { setError(e.message); }
+    finally { setInviting(false); }
   }
 
   // Cancel the meeting: notify attendees on LINE, then it moves to the trash.
@@ -113,8 +130,8 @@ export default function HostDashboard({ meetingId, go }) {
     const fmtDT = (ms) => ms ? new Date(ms).toLocaleString(en ? "en-US" : "zh-TW") : (en ? "—" : "—");
     const statusOf = (r) => r.rsvp === "yes" ? (en ? "Confirmed" : "已確認") : r.rsvp === "leave" ? (en ? "Leave" : "請假") : (en ? "No reply" : "未回覆");
     const header = en
-      ? ["Name", "Employee ID / Dept", "Status", "Leave reason", "Agenda read", "Checked in", "Comments"]
-      : ["姓名", "員工編號 / 部門", "出席狀態", "請假事由", "議程已讀", "報到時間", "議程意見"];
+      ? ["Name", "Employee ID / Dept", "Status", "Leave reason", "Agenda read", "Checked in", "Checked out", "Comments"]
+      : ["姓名", "員工編號 / 部門", "出席狀態", "請假事由", "議程已讀", "報到時間", "簽退時間", "議程意見"];
     const esc = (v) => { const s = String(v ?? ""); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
     const rows = [header];
     for (const p of roster) {
@@ -123,7 +140,7 @@ export default function HostDashboard({ meetingId, go }) {
       const comments = topics
         .map((tp) => { const c = r.comments?.[tp.id]; return c && c.stance !== "none" ? `${tp.order}.${tp.title}: ${t(`stance.${c.stance}`)}${c.text ? `(${c.text})` : ""}` : null; })
         .filter(Boolean).join(" | ");
-      rows.push([p.name, p.dept, statusOf(r), leave, r.agendaReadAt ? fmtDT(r.agendaReadAt) : "", r.checkedInAt ? fmtDT(r.checkedInAt) : "", comments]);
+      rows.push([p.name, p.dept, statusOf(r), leave, r.agendaReadAt ? fmtDT(r.agendaReadAt) : "", r.checkedInAt ? fmtDT(r.checkedInAt) : "", r.checkedOutAt ? fmtDT(r.checkedOutAt) : "", comments]);
     }
     const csv = "﻿" + rows.map((row) => row.map(esc).join(",")).join("\r\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
@@ -176,16 +193,37 @@ export default function HostDashboard({ meetingId, go }) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 500 }}>{t("host.rosterTitle")}</h3>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <button onClick={toggleInvite} style={{ ...btn(showInvite), height: 32, fontSize: 12 }}>➕ {t("host.invite")}</button>
             <button onClick={downloadReport} style={{ ...btn(false), height: 32, fontSize: 12 }}>{t("host.download")}</button>
-            <button onClick={sendCheckin} disabled={sendingCk} style={{ ...btn(false), height: 32, fontSize: 12 }}>
-              {sendingCk ? t("host.sendingCheckin") : t("host.sendCheckin")}
-            </button>
             <button onClick={remind} disabled={reminding} style={{ ...btn(false), height: 32, fontSize: 12 }}>
               {reminding ? t("host.reminding") : t("host.remind")}
             </button>
             <button onClick={toggleQR} style={{ ...btn(showQR), height: 32, fontSize: 12 }}>📷 {t("host.checkinQR")}</button>
           </div>
         </div>
+        {showInvite ? (() => {
+          const onRoster = new Set((roster || []).map((p) => p.lineUserId).filter(Boolean));
+          const availPool = (pool || [])
+            .filter((mem) => !onRoster.has(mem.lineUserId))
+            .map((mem) => ({ id: mem.lineUserId, name: mem.name, dept: mem.employeeId || mem.department || "—", lineUserId: mem.lineUserId }));
+          const n = inviteSel.length;
+          return (
+            <div style={{ marginBottom: 14, padding: "14px", border: "0.5px dashed " + ACCENT + "66", borderRadius: 12, background: ACCENT + "08" }}>
+              <p style={{ margin: "0 0 10px", fontSize: 13, color: "var(--color-text-secondary)" }}>{t("host.inviteDesc")}</p>
+              {pool === null ? <p style={{ margin: 0, fontSize: 13, color: "var(--color-text-secondary)" }}>{t("common.loading")}</p>
+                : availPool.length === 0 ? <p style={{ margin: 0, fontSize: 13, color: "var(--color-text-tertiary,#999)" }}>{t("host.inviteNone")}</p>
+                : (
+                  <>
+                    <RecipientPicker pool={availPool} recipients={inviteSel} setRecipients={setInviteSel} />
+                    <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                      <button onClick={() => submitInvite(availPool)} disabled={inviting || n === 0} style={{ ...btn(true), height: 36, fontSize: 13, opacity: (inviting || n === 0) ? 0.5 : 1 }}>{inviting ? t("host.inviting") : t("host.inviteN", { n })}</button>
+                      <button onClick={() => setShowInvite(false)} style={{ ...btn(false), height: 36, fontSize: 13 }}>{t("common.cancel")}</button>
+                    </div>
+                  </>
+                )}
+            </div>
+          );
+        })() : null}
         {showQR ? (
           <div style={{ marginBottom: 14, padding: "16px", border: "0.5px dashed " + ACCENT + "66", borderRadius: 12, background: ACCENT + "08" }}>
             <p style={{ margin: "0 0 12px", fontSize: 13, color: "var(--color-text-secondary)", textAlign: "center" }}>{t("host.checkinQRDesc")}</p>
@@ -198,11 +236,6 @@ export default function HostDashboard({ meetingId, go }) {
                 <button onClick={copyLink} style={{ ...btn(false), height: 30, fontSize: 12 }}>{copied ? t("host.copied") : t("host.copyLink")}</button>
               </div>
             </div>
-          </div>
-        ) : null}
-        {ckResult ? (
-          <div style={{ marginBottom: 12, padding: "0.6rem 0.9rem", background: "#E1F5EE", color: GREEN, borderRadius: 8, fontSize: 13 }}>
-            {t("host.checkinSent", { pushed: ckResult.pushed, total: ckResult.recipients })}
           </div>
         ) : null}
         {remindResult ? (
@@ -235,7 +268,7 @@ export default function HostDashboard({ meetingId, go }) {
                   {r.checkedInAt
                     ? <span style={pill("#E1F5EE", "#0F6E56")}>🙋 {fmtTime(r.checkedInAt)}</span>
                     : <span style={pill("rgba(0,0,0,.06)", "#999")}>{t("host.notCheckedIn")}</span>}
-                  <button onClick={() => go("invite", { m: meetingId, p: p.id })} style={{ ...btn(false), height: 28, fontSize: 11, padding: "0 10px" }}>{t("host.playAs")}</button>
+                  {r.checkedOutAt ? <span style={pill("#EDEBF7", ACCENT)}>👋 {fmtTime(r.checkedOutAt)}</span> : null}
                 </div>
               </div>
             );

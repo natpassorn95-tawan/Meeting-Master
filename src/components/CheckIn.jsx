@@ -45,6 +45,12 @@ export default function CheckIn({ meetingId, userId }) {
     catch (e) { setError(e.message); }
     finally { setBusy(false); }
   }
+  async function doCheckOut() {
+    setBusy(true); setError("");
+    try { await api.checkout(meetingId, name); await load(); }
+    catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  }
 
   if (error) return <Shell><p style={{ color: RED }}>⚠ {error}</p></Shell>;
   if (!meeting) return <Shell><p style={{ color: "var(--color-text-secondary)" }}>{t("common.loading")}</p></Shell>;
@@ -56,6 +62,8 @@ export default function CheckIn({ meetingId, userId }) {
   const startMs = Date.parse(`${meeting.date}T${meeting.startTime || "00:00"}:00`);
   const endMs = meeting.endTime ? Date.parse(`${meeting.date}T${meeting.endTime}:00`) : (Number.isFinite(startMs) ? startMs + 2 * 3600 * 1000 : NaN);
   const now = Date.now();
+  const checkoutEndMs = Number.isFinite(endMs) ? endMs + 60 * 60 * 1000 : NaN; // end + 1h
+  const checkoutOpen = Number.isFinite(startMs) && now >= startMs && Number.isFinite(checkoutEndMs) && now <= checkoutEndMs;
   const notStarted = Number.isFinite(startMs) && now < startMs;
   const ended = Number.isFinite(endMs) && now > endMs;
   const open = !notStarted && !ended;
@@ -97,7 +105,12 @@ export default function CheckIn({ meetingId, userId }) {
             <div style={{ textAlign: "center" }}>
               <div style={{ width: 56, height: 56, borderRadius: "50%", background: "#E1F5EE", color: GREEN, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, margin: "0 auto 12px" }}>✓</div>
               <p style={{ margin: "0 0 2px", fontSize: 16, fontWeight: 500 }}>{t("checkin.done")}</p>
-              <p style={{ margin: 0, fontSize: 13, color: "var(--color-text-secondary)" }}>{name}・{fmtTime(me.checkedInAt)}</p>
+              <p style={{ margin: "0 0 14px", fontSize: 13, color: "var(--color-text-secondary)" }}>{name}・{fmtTime(me.checkedInAt)}{me.checkedOutAt ? ` → ${fmtTime(me.checkedOutAt)}` : ""}</p>
+              {me.checkedOutAt ? (
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 999, background: "#EDEBF7", color: ACCENT, fontSize: 14, fontWeight: 600 }}>👋 {t("checkin.checkedOut")}</div>
+              ) : checkoutOpen ? (
+                <button onClick={doCheckOut} disabled={busy} style={{ width: "100%", height: 46, fontSize: 15, fontWeight: 600, borderRadius: 8, border: "none", cursor: busy ? "default" : "pointer", background: ACCENT, color: "#fff", opacity: busy ? 0.5 : 1 }}>👋 {busy ? t("checkin.checking") : t("checkin.checkout")}</button>
+              ) : null}
             </div>
           ) : (
             <>
@@ -108,6 +121,21 @@ export default function CheckIn({ meetingId, userId }) {
           {error ? <p style={{ margin: "10px 0 0", fontSize: 13, color: RED }}>⚠ {error}</p> : null}
         </div>
       </div>
+
+      {/* Agenda for this meeting */}
+      {meeting.topics?.length ? (
+        <div style={{ ...card, marginBottom: 16 }}>
+          <h3 style={{ margin: "0 0 12px", fontSize: 16, fontWeight: 500 }}>📋 {t("checkin.agendaTitle")}</h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {meeting.topics.map((tp) => (
+              <div key={tp.id}>
+                <p style={{ margin: 0, fontSize: 14, fontWeight: 500 }}>{tp.order}. {tp.title}</p>
+                {tp.description ? <p style={{ margin: "2px 0 0", fontSize: 13, color: "var(--color-text-secondary)", lineHeight: 1.5 }}>{tp.description}</p> : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {/* Real-time join list */}
       <div style={card}>

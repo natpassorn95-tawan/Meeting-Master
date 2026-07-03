@@ -1,10 +1,10 @@
 // Thin client over the Meeting Master dev API (server/index.js).
 
-async function req(path, options) {
-  const res = await fetch(`/api${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
+async function req(path, options = {}) {
+  const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+  // Console identity (who am I) — scopes what the API returns / lets me edit.
+  try { const u = localStorage.getItem("mm_user"); if (u) headers["x-mm-user"] = u; } catch { /* ignore */ }
+  const res = await fetch(`/api${path}`, { ...options, headers });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || `Request failed: ${res.status}`);
@@ -38,6 +38,7 @@ export const api = {
   setTopics: (id, topics) => put(`/meetings/${id}/topics`, { topics }),
   setRoster: (id, roster) => put(`/meetings/${id}/roster`, { roster }),
   enroll: (id, person) => post(`/meetings/${id}/enroll`, person),
+  inviteToMeeting: (id, members) => post(`/meetings/${id}/invite`, { members }),
   uploadFile: (payload) => post("/uploads", payload), // { name, type, dataUrl }
 
   // My Meetings (participant manages attendance across occurrences)
@@ -56,6 +57,7 @@ export const api = {
     post(`/meetings/${id}/participant/${pid}/rsvp`, { value, leaveReason }),
   markAgendaRead: (id, pid) => post(`/meetings/${id}/participant/${pid}/agenda-read`),
   checkin: (id, name) => post(`/meetings/${id}/checkin`, { name }),
+  checkout: (id, name) => post(`/meetings/${id}/checkout`, { name }),
   sendCheckin: (id) => post(`/meetings/${id}/send-checkin`),
   checkinLink: (id) => req(`/meetings/${id}/checkin-link`),
   setComment: (id, pid, topicId, stance, text) =>

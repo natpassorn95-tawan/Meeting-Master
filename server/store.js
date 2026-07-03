@@ -145,6 +145,7 @@ function blankResponse(p) {
     agendaReadAt: null,
     checkinSentAt: null, // when the check-in button was pushed to them (dedupe)
     checkedInAt: null, // timestamp when they checked in at meeting start
+    checkedOutAt: null, // timestamp when they checked out (until end + 1h)
     comments: {}, // { [topicId]: { stance, text, at } }
     updatedAt: null,
   };
@@ -178,6 +179,9 @@ function createMeeting(input) {
     location: input.location || "",
     host: input.host || "",
     agendaUrl: input.agendaUrl || "",
+    // Access control: public (default, everyone) or private (creator + invited).
+    visibility: input.visibility === "private" ? "private" : "public",
+    creatorId: input.creatorId || null,
     topics,
     attachments: input.attachments || [], // [{ url, name, type, size }]
     roster,
@@ -257,6 +261,19 @@ function listMeetings() {
   return store.order.map((id) => store.meetings[id]).filter(Boolean);
 }
 
+// Add someone to a schedule's invite list (recipientIds + roster) so the invite
+// applies to visibility and future occurrences, not just the current instance.
+function addScheduleInvitee(scheduleId, member) {
+  const s = store.schedules[scheduleId];
+  if (!s || !member?.lineUserId) return;
+  s.recipientIds = s.recipientIds || [];
+  if (!s.recipientIds.includes(member.lineUserId)) s.recipientIds.push(member.lineUserId);
+  s.roster = s.roster || [];
+  if (!s.roster.some((p) => p.lineUserId === member.lineUserId || p.id === member.lineUserId)) {
+    s.roster.push({ id: member.lineUserId, name: member.name, dept: member.dept || "—", lineUserId: member.lineUserId });
+  }
+}
+
 function getResponse(meetingId, participantId) {
   const m = getMeeting(meetingId);
   if (!m) return null;
@@ -276,6 +293,14 @@ function checkIn(meetingId, participantId) {
   const r = getResponse(meetingId, participantId);
   if (!r) return null;
   if (!r.checkedInAt) r.checkedInAt = Date.now(); // first check-in wins
+  r.updatedAt = Date.now();
+  return r;
+}
+
+function checkOut(meetingId, participantId) {
+  const r = getResponse(meetingId, participantId);
+  if (!r) return null;
+  if (!r.checkedOutAt) r.checkedOutAt = Date.now(); // first check-out wins
   r.updatedAt = Date.now();
   return r;
 }
@@ -466,6 +491,9 @@ function createSchedule(input) {
       id: r.id || uid("P"), name: r.name, dept: r.dept || "—", lineUserId: r.lineUserId || null,
     })),
     recipientIds: input.recipientIds || [],
+    // Access control: public (everyone) or private (creator + invited recipients).
+    visibility: input.visibility === "private" ? "private" : "public",
+    creatorId: input.creatorId || null,
     enabled: input.enabled !== false,
     fired: {}, // dedupe map keyed by `${occurrenceKey}@${lead}`
     createdAt: now,
@@ -604,18 +632,31 @@ function memberUpcoming(name, fromMs, toMs) {
     const occ = nextOccurrence(s, fromMs - 1); // nearest occurrence at/after fromMs
     if (!occ || occ.getTime() > toMs) continue;
     const occKey = ymd(occ);
-    const inst = getMeeting(`${s.id}__${occKey}`);
+    const occId = `${s.id}__${occKey}`;
+    if (store.tombstones[occId]) continue; // permanently deleted → hidden (matches the calendar)
+    const active = getMeeting(occId);
+    // Reflect cancel/delete status so My Meetings stays aligned with the calendar.
+    const status = store.cancelled[occId] ? "cancelled" : store.deleted[occId] ? "deleted" : null;
+    const inst = active || store.cancelled[occId] || store.deleted[occId] || null;
     let rsvp = getStanding(s.id, name);
     let leaveReason = null;
+    let checkedInAt = null;
+    let checkedOutAt = null;
     if (inst) { // explicit per-date choice on the materialised instance wins
       const p = inst.roster.find((r) => r.name === name);
       const r = p ? inst.responses[p.id] : null;
       if (r?.rsvp) { rsvp = r.rsvp; leaveReason = r.rsvp === "leave" ? r.leaveReason : null; }
+      checkedInAt = r?.checkedInAt || null;
+      checkedOutAt = r?.checkedOutAt || null;
     }
+    const tsrc = (inst?.topics?.length ? inst.topics : s.topics) || [];
+    const topics = tsrc.map((tp) => ({ title: tp.title || "", description: tp.description || "" })).filter((tp) => tp.title);
+    const attachments = (inst?.attachments?.length ? inst.attachments : s.attachments) || [];
     out.push({
-      kind: inst ? "meeting" : "scheduled", scheduleId: s.id, occKey, meetingId: inst?.id,
+      kind: status || (active ? "meeting" : "scheduled"), status,
+      scheduleId: s.id, occKey, meetingId: active?.id,
       date: occKey, title: s.title, startTime: s.startTime, endTime: s.endTime,
-      recurring: s.recurrence.freq !== "once", rsvp, leaveReason,
+      recurring: s.recurrence.freq !== "once", rsvp, leaveReason, checkedInAt, checkedOutAt, topics, attachments,
     });
   }
 
@@ -628,10 +669,13 @@ function memberUpcoming(name, fromMs, toMs) {
     const p = m.roster.find((r) => r.name === name);
     if (!p) continue;
     const r = m.responses[p.id];
-    out.push({ kind: "meeting", meetingId: m.id, date: m.date, title: m.title, startTime: m.startTime, endTime: m.endTime, recurring: false, rsvp: r?.rsvp || null, leaveReason: r?.rsvp === "leave" ? r.leaveReason : null });
+    const topics = (m.topics || []).map((tp) => ({ title: tp.title || "", description: tp.description || "" })).filter((tp) => tp.title);
+    out.push({ kind: "meeting", meetingId: m.id, date: m.date, title: m.title, startTime: m.startTime, endTime: m.endTime, recurring: false, rsvp: r?.rsvp || null, leaveReason: r?.rsvp === "leave" ? r.leaveReason : null, checkedInAt: r?.checkedInAt || null, checkedOutAt: r?.checkedOutAt || null, topics, attachments: m.attachments || [] });
   }
 
-  out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  // Order by date, then start time (so same-day meetings run in start-time order).
+  const key = (x) => `${x.date}T${x.startTime || "00:00"}`;
+  out.sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
   return out;
 }
 
@@ -694,10 +738,12 @@ export {
   setTopics,
   setRoster,
   addParticipant,
+  addScheduleInvitee,
   listMeetings,
   getResponse,
   setRsvp,
   checkIn,
+  checkOut,
   markAgendaRead,
   setComment,
   linkLineUser,

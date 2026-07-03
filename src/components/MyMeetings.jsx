@@ -3,6 +3,7 @@ import { api } from "../api.js";
 import { ACCENT, GREEN, RED, card, label, input, btn, pill, LEAVE_TYPES } from "../ui.js";
 import { useT, fmtDateTimeI18n } from "../i18n.jsx";
 import { liffConfigured, getLiffProfile } from "../liff.js";
+import { attIcon } from "./Schedules.jsx";
 
 const NAME_KEY = "mm_name";
 const localToday = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
@@ -48,6 +49,8 @@ export default function MyMeetings({ userId }) {
     } catch (e) { setError(e.message); }
   }, [name, from, to]);
   useEffect(() => { load(); }, [load]);
+  // Poll so check-in status / cancellations reflect without a manual refresh.
+  useEffect(() => { const id = setInterval(load, 10000); return () => clearInterval(id); }, [load]);
 
   // Performance over the selected window (range), or the current month when "All".
   useEffect(() => {
@@ -64,6 +67,16 @@ export default function MyMeetings({ userId }) {
     try {
       await api.myMeetingsRsvp({ name, value, leaveReason, meetingId: it.meetingId, scheduleId: it.scheduleId, occKey: it.occKey });
       await load();
+    } catch (e) { setError(e.message); }
+    finally { setBusyKey(""); }
+  }
+
+  async function checkout(it) {
+    setBusyKey(keyOf(it)); setError("");
+    try {
+      let mid = it.meetingId;
+      if (!mid && it.scheduleId && it.occKey) { const m = await api.materialize(it.scheduleId, it.occKey); mid = m.id; }
+      if (mid) { await api.checkout(mid, name); await load(); }
     } catch (e) { setError(e.message); }
     finally { setBusyKey(""); }
   }
@@ -117,7 +130,7 @@ export default function MyMeetings({ userId }) {
         <div style={card}><p style={{ margin: 0, fontSize: 14, color: "var(--color-text-tertiary,#999)" }}>{t("mymeetings.none")}</p></div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {items.map((it) => <Row key={keyOf(it)} it={it} t={t} lang={lang} busy={busyKey === keyOf(it)} onSet={setRsvp} userId={userId} />)}
+          {items.map((it) => <Row key={keyOf(it)} it={it} t={t} lang={lang} busy={busyKey === keyOf(it)} onSet={setRsvp} onCheckout={checkout} userId={userId} />)}
         </div>
       )}
 
@@ -154,40 +167,105 @@ function Stat({ n, label, color, sub }) {
   );
 }
 
-function Row({ it, t, lang, busy, onSet, userId }) {
+function Row({ it, t, lang, busy, onSet, onCheckout, userId }) {
   const isLeave = it.rsvp === "leave";
   const isYes = it.rsvp === "yes";
   const [reason, setReason] = useState(it.leaveReason?.type || LEAVE_TYPES[0]);
-  // A meeting is locked once it has ended (current/ongoing + future stay editable).
-  // Fall back to end-of-day when there's no end time so an ongoing day isn't locked.
-  const endMs = Date.parse(`${it.date}T${it.endTime || it.startTime || "23:59"}:00`);
-  const past = Number.isFinite(endMs) && endMs < Date.now();
-  // Check-in window: strictly the meeting period (start → end). When it's open
-  // and the person has confirmed, offer an in-app check-in button.
+  const [going, setGoing] = useState(false);
+  // Cancelled / deleted meetings are shown (locked) so they stay aligned with the
+  // calendar; permanently-deleted ones are already filtered out server-side.
+  const cancelled = it.status === "cancelled";
+  const deleted = it.status === "deleted";
+  const removed = cancelled || deleted;
+  const checkedIn = !!it.checkedInAt; // already checked in (via any path)
+  const checkedOut = !!it.checkedOutAt;
+  // Meeting phase: upcoming (before start) → confirm/leave; ongoing (start→end) →
+  // check-in only; ended (after end) → locked, no edits.
   const startMs = Date.parse(`${it.date}T${it.startTime || "00:00"}:00`);
-  const endFull = it.endTime ? Date.parse(`${it.date}T${it.endTime}:00`) : (Number.isFinite(startMs) ? startMs + 2 * 3600 * 1000 : NaN);
-  const checkinOpen = Number.isFinite(startMs) && Date.now() >= startMs && Number.isFinite(endFull) && Date.now() <= endFull;
-  const checkinHref = it.meetingId ? `/?view=checkin&m=${encodeURIComponent(it.meetingId)}${userId ? `&u=${encodeURIComponent(userId)}` : ""}` : null;
+  const endMs = it.endTime ? Date.parse(`${it.date}T${it.endTime}:00`) : (Number.isFinite(startMs) ? startMs + 2 * 3600 * 1000 : NaN);
+  const now = Date.now();
+  const ongoing = Number.isFinite(startMs) && now >= startMs && Number.isFinite(endMs) && now <= endMs;
+  const ended = Number.isFinite(endMs) && now > endMs;
+  // Check-out stays open until end + 1 hour; requires having checked in.
+  const canCheckout = checkedIn && !checkedOut && Number.isFinite(startMs) && now >= startMs && Number.isFinite(endMs) && now <= endMs + 60 * 60 * 1000;
+
+  // Open the check-in page (materialise the occurrence first if needed).
+  async function goCheckin() {
+    setGoing(true);
+    let mid = it.meetingId;
+    if (!mid && it.scheduleId && it.occKey) {
+      try { const m = await api.materialize(it.scheduleId, it.occKey); mid = m.id; } catch { setGoing(false); return; }
+    }
+    if (mid) window.location.href = `/?view=checkin&m=${encodeURIComponent(mid)}${userId ? `&u=${encodeURIComponent(userId)}` : ""}`;
+    else setGoing(false);
+  }
+
+  // Once a choice is made, its button is disabled (already selected); the other
+  // stays clickable so they can still switch before the meeting.
   const optBtn = (active, color, text, onClick) => (
-    <button onClick={onClick} disabled={busy} style={{ flex: 1, height: 38, fontSize: 13, fontWeight: 500, borderRadius: 8, cursor: "pointer", border: active ? "none" : "0.5px solid rgba(0,0,0,.2)", background: active ? color : "transparent", color: active ? "#fff" : "var(--color-text-primary)", opacity: busy ? 0.6 : 1 }}>{text}</button>
+    <button onClick={onClick} disabled={busy || active} style={{ flex: 1, height: 38, fontSize: 13, fontWeight: 500, borderRadius: 8, cursor: (busy || active) ? "default" : "pointer", border: active ? "none" : "0.5px solid rgba(0,0,0,.2)", background: active ? color : "transparent", color: active ? "#fff" : "var(--color-text-primary)", opacity: busy ? 0.6 : 1 }}>{text}</button>
   );
   return (
-    <div style={{ ...card, ...(past ? { opacity: 0.75 } : {}) }}>
+    <div style={{ ...card, ...((ended || removed) ? { opacity: 0.7 } : {}) }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-        <p style={{ margin: 0, fontSize: 16, fontWeight: 500 }}>{it.title || "（未命名會議）"}</p>
-        {past ? <span style={pill("rgba(0,0,0,.06)", "#888")}>{t("mymeetings.passedTag")}</span> : null}
-        {isYes ? <span style={pill("#E1F5EE", GREEN)}>{t("mymeetings.confirmed")}</span> : null}
-        {isLeave ? <span style={pill("#F7E4EC", RED)}>{t("mymeetings.onLeave")}</span> : null}
+        <p style={{ margin: 0, fontSize: 16, fontWeight: 500, ...(removed ? { textDecoration: "line-through", color: "var(--color-text-secondary)" } : {}) }}>{it.title || "（未命名會議）"}</p>
+        {cancelled ? <span style={pill("#F7E4EC", RED)}>{t("mymeetings.cancelledTag")}</span> : null}
+        {deleted ? <span style={pill("rgba(0,0,0,.06)", "#888")}>{t("mymeetings.deletedTag")}</span> : null}
+        {!removed && ended ? <span style={pill("rgba(0,0,0,.06)", "#888")}>{t("mymeetings.passedTag")}</span> : null}
+        {!removed && ongoing ? <span style={pill(ACCENT + "1F", ACCENT)}>{t("mymeetings.ongoingTag")}</span> : null}
+        {!removed && checkedOut ? <span style={pill("#EDEBF7", ACCENT)}>👋 {t("mymeetings.checkedOut")}</span> : null}
+        {!removed && !checkedOut && checkedIn ? <span style={pill("#E1F5EE", GREEN)}>✓ {t("mymeetings.checkedIn")}</span> : null}
+        {!removed && !checkedIn && isYes ? <span style={pill("#E1F5EE", GREEN)}>{t("mymeetings.confirmed")}</span> : null}
+        {!removed && isLeave ? <span style={pill("#F7E4EC", RED)}>{t("mymeetings.onLeave")}</span> : null}
       </div>
       <p style={{ margin: "2px 0 12px", fontSize: 13, color: "var(--color-text-secondary)" }}>
         {fmtDateTimeI18n(it.date, it.startTime, it.endTime, lang)}
-        {it.recurring ? <span style={{ marginLeft: 6, fontSize: 12, color: "var(--color-text-tertiary,#999)" }}>🔁 {t("mymeetings.nextOccurrence")}</span> : null}
+        {!removed && it.recurring ? <span style={{ marginLeft: 6, fontSize: 12, color: "var(--color-text-tertiary,#999)" }}>🔁 {t("mymeetings.nextOccurrence")}</span> : null}
       </p>
-      {checkinOpen && isYes && checkinHref ? (
-        <a href={checkinHref} style={{ display: "block", textAlign: "center", height: 46, lineHeight: "46px", borderRadius: 8, background: GREEN, color: "#fff", fontSize: 15, fontWeight: 600, textDecoration: "none", marginBottom: past ? 0 : 12 }}>🙋 {t("checkin.button")}</a>
+      {!removed && (it.topics?.length || it.attachments?.length) ? (
+        <div style={{ marginBottom: 12, padding: "10px 12px", background: "var(--color-background-secondary,#f6f6f7)", borderRadius: 8 }}>
+          {it.topics?.length ? (
+            <>
+              <p style={{ margin: "0 0 6px", fontSize: 12, fontWeight: 600, color: "var(--color-text-secondary)" }}>📋 {t("mymeetings.agenda")}</p>
+              {it.topics.map((tp, i) => (
+                <p key={i} style={{ margin: "0 0 3px", fontSize: 13, lineHeight: 1.45 }}>
+                  {i + 1}. {tp.title}
+                  {tp.description ? <span style={{ color: "var(--color-text-secondary)" }}>　{tp.description}</span> : null}
+                </p>
+              ))}
+            </>
+          ) : null}
+          {it.attachments?.length ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: it.topics?.length ? 8 : 0 }}>
+              {it.attachments.map((a) => (
+                <a key={a.url} href={a.url} target="_blank" rel="noreferrer"
+                  style={{ display: "inline-flex", alignItems: "center", gap: 5, maxWidth: 220, padding: "4px 9px", fontSize: 12, borderRadius: 8, border: "0.5px solid rgba(0,0,0,.18)", background: "#fff", color: "var(--color-text-primary)", textDecoration: "none" }}>
+                  <span>{attIcon(a.type, a.name)}</span>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.name}</span>
+                </a>
+              ))}
+            </div>
+          ) : null}
+        </div>
       ) : null}
-      {past ? (
-        <p style={{ margin: 0, fontSize: 13, color: "var(--color-text-tertiary,#999)" }}>🔒 {t("mymeetings.passed")}</p>
+      {removed ? (
+        <p style={{ margin: 0, fontSize: 13, color: "var(--color-text-tertiary,#999)" }}>🚫 {cancelled ? t("mymeetings.cancelledNote") : t("mymeetings.deletedNote")}</p>
+      ) : checkedOut ? (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, height: 44, borderRadius: 8, background: "#EDEBF7", color: ACCENT, fontSize: 15, fontWeight: 600 }}>✓ {t("mymeetings.checkedIn")}・👋 {t("mymeetings.checkedOut")}</div>
+      ) : canCheckout ? (
+        <>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, height: 32, marginBottom: 8, borderRadius: 8, background: "#E1F5EE", color: GREEN, fontSize: 14, fontWeight: 600 }}>✓ {t("mymeetings.checkedIn")}</div>
+          <button onClick={() => onCheckout(it)} disabled={busy} style={{ width: "100%", height: 46, fontSize: 15, fontWeight: 600, borderRadius: 8, border: "none", cursor: busy ? "default" : "pointer", background: ACCENT, color: "#fff", opacity: busy ? 0.6 : 1 }}>👋 {t("checkin.checkout")}</button>
+        </>
+      ) : checkedIn ? (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, height: 44, borderRadius: 8, background: "#E1F5EE", color: GREEN, fontSize: 15, fontWeight: 600 }}>✓ {t("mymeetings.checkedIn")}</div>
+      ) : ongoing ? (
+        <>
+          <button onClick={goCheckin} disabled={going} style={{ width: "100%", height: 48, fontSize: 16, fontWeight: 600, borderRadius: 8, border: "none", cursor: going ? "default" : "pointer", background: GREEN, color: "#fff", opacity: going ? 0.6 : 1 }}>🙋 {t("checkin.button")}</button>
+          <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--color-text-tertiary,#999)", textAlign: "center" }}>{t("mymeetings.checkinHint")}</p>
+        </>
+      ) : ended ? (
+        <p style={{ margin: 0, fontSize: 13, color: "var(--color-text-tertiary,#999)" }}>{t("mymeetings.passed")}</p>
       ) : (
         <>
           <div style={{ display: "flex", gap: 8 }}>

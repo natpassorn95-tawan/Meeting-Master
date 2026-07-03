@@ -141,6 +141,7 @@ export function CreateForm({ dates = [], onCreated, onClose, setError }) {
   const [f, setF] = useState({
     title: "", location: "", host: "", startTime: "14:00", endTime: "15:30",
     freq: "weekly", weekday: 5, nth: 1, date: "", startDate: "", endDate: "", leads: [15], topics: "",
+    visibility: "public",
   });
   const [recipients, setRecipients] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -201,6 +202,7 @@ export function CreateForm({ dates = [], onCreated, onClose, setError }) {
       topics: f.topics.split("\n").map((x) => x.trim()).filter(Boolean),
       attachments,
       roster: pool, recipientIds: recipients,
+      visibility: f.visibility,
     };
     try {
       let notified = 0;
@@ -237,6 +239,21 @@ export function CreateForm({ dates = [], onCreated, onClose, setError }) {
         <div style={{ flex: "1 1 200px" }}><label style={label}>{t("label.location")}</label><input style={input} value={f.location} onChange={set("location")} placeholder={t("sched.locPlaceholder")} /></div>
         <div style={{ flex: "1 1 200px" }}><label style={label}>{t("label.hostFull")}</label><input style={input} value={f.host} onChange={set("host")} placeholder={t("sched.hostPlaceholder")} /></div>
       </div>
+
+      <div style={{ height: 14 }} />
+      <label style={label}>{t("sched.visibility")}</label>
+      <div style={{ display: "flex", gap: 8 }}>
+        {[["public", t("sched.public")], ["private", t("sched.private")]].map(([val, lbl]) => {
+          const on = f.visibility === val;
+          return (
+            <button key={val} type="button" onClick={() => setF((p) => ({ ...p, visibility: val }))}
+              style={{ flex: 1, height: 38, fontSize: 13, fontWeight: 500, borderRadius: 8, cursor: "pointer", border: on ? "none" : "0.5px solid rgba(0,0,0,.25)", background: on ? ACCENT : "transparent", color: on ? "#fff" : "var(--color-text-primary)" }}>
+              {val === "private" ? "🔒 " : "🌐 "}{lbl}
+            </button>
+          );
+        })}
+      </div>
+      <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-text-tertiary,#999)" }}>{f.visibility === "private" ? t("sched.privateHint") : t("sched.publicHint")}</p>
 
       <div style={{ height: 14 }} />
       {multi ? (
@@ -350,7 +367,7 @@ export function CreateForm({ dates = [], onCreated, onClose, setError }) {
 // Recipient multi-select shown as a dropdown: a summary button that expands an
 // inline, searchable checklist with select-all / clear. Scales to many members
 // (scrolls) far better than a flat row of toggle chips.
-function RecipientPicker({ pool, recipients, setRecipients }) {
+export function RecipientPicker({ pool, recipients, setRecipients }) {
   const { t } = useT();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
