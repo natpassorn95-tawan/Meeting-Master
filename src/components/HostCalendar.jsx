@@ -24,11 +24,11 @@ function expandRange(a, b) {
 // Host page — the single admin operations surface. A month calendar of meetings
 // (created instances + projected occurrences of recurring schedules). Click a
 // day to select it, or press-and-drag across several days to select a range.
-// The day panel shows the selected day(s)' events — each can be opened (attendee
-// dashboard), cancelled (→ Cancelled folder, attendees notified) or deleted (→
-// Deleted folder) — and a "Schedule" button opens a popup that creates a meeting
-// on the selected day (or one on each day of a multi-day selection). Below sit
-// the recurring-schedule manager and the Cancelled + Deleted folders.
+// The day panel shows the selected day(s)' events — each can be edited or opened
+// (attendee dashboard; cancel/delete live inside the dashboard) — and a
+// "Schedule" button opens a popup that creates a meeting on the selected day
+// (or one on each day of a multi-day selection). Below sit the
+// recurring-schedule manager and the Cancelled + Deleted folders.
 export default function HostCalendar({ go }) {
   const { t, lang } = useT();
   const [events, setEvents] = useState(null);
@@ -105,21 +105,13 @@ export default function HostCalendar({ go }) {
   }
 
   // A projected schedule occurrence has no meeting id yet — materialise it first
-  // so it can be cancelled / deleted as a concrete meeting.
+  // so it can be edited as a concrete meeting.
   async function meetingIdOf(ev) {
     if (ev.type === "meeting") return ev.id;
     const m = await api.materialize(ev.scheduleId, ev.occKey);
     return m.id;
   }
 
-  function cancelEvent(ev) {
-    if (!confirm(t("hostcal.cancelConfirm", { title: ev.title || "" }))) return;
-    act(async () => { await api.cancelMeeting(await meetingIdOf(ev)); });
-  }
-  function deleteEvent(ev) {
-    if (!confirm(t("hostcal.deleteConfirm", { title: ev.title || "" }))) return;
-    act(async () => { await api.trashMeeting(await meetingIdOf(ev)); });
-  }
   async function editEvent(ev) {
     setBusy(true); setError("");
     try {
@@ -260,7 +252,7 @@ export default function HostCalendar({ go }) {
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {dayEvents.map((ev, idx) => (
-              <EventRow key={idx} ev={ev} past={ev.date < todayStr} t={t} lang={lang} busy={busy} onOpen={open} onEdit={editEvent} onCancel={cancelEvent} onDelete={deleteEvent} />
+              <EventRow key={idx} ev={ev} past={ev.date < todayStr} t={t} lang={lang} busy={busy} onOpen={open} onEdit={editEvent} />
             ))}
           </div>
         )}
@@ -355,7 +347,7 @@ function TrashRow({ m, t, lang, busy, onRestore }) {
   );
 }
 
-function EventRow({ ev, past, t, lang, busy, onOpen, onEdit, onCancel, onDelete }) {
+function EventRow({ ev, past, t, lang, busy, onOpen, onEdit }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 12px", border: "0.5px solid rgba(0,0,0,.12)", borderRadius: 10, flexWrap: "wrap", background: "#fff" }}>
       <button onClick={() => onOpen(ev)} disabled={busy} style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2, background: "transparent", border: "none", cursor: "pointer", textAlign: "left", padding: 0 }}>
@@ -374,10 +366,6 @@ function EventRow({ ev, past, t, lang, busy, onOpen, onEdit, onCancel, onDelete 
         {!past ? (
           <button onClick={() => onEdit(ev)} disabled={busy} style={{ ...softBtn(ACCENT), opacity: busy ? 0.5 : 1 }}>{t("hostcal.editEvent")}</button>
         ) : null}
-        {!past ? (
-          <button onClick={() => onCancel(ev)} disabled={busy} style={{ ...softBtn(RED), opacity: busy ? 0.5 : 1 }}>{t("hostcal.cancelEvent")}</button>
-        ) : null}
-        <button onClick={() => onDelete(ev)} disabled={busy} style={{ ...softBtn(RED), opacity: busy ? 0.5 : 1 }}>{t("hostcal.deleteEvent")}</button>
         <span onClick={() => !busy && onOpen(ev)} style={{ ...btn(true), height: 32, fontSize: 13, display: "inline-flex", alignItems: "center", cursor: busy ? "default" : "pointer" }}>{t("hostcal.open")}</span>
       </div>
     </div>
