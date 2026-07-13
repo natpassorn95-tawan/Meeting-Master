@@ -34,6 +34,44 @@ export default function Members({ go }) {
     catch (e) { setError(e.message); }
   }
 
+  // Export the member list to a CSV the operator can open in Excel / Sheets.
+  // Built entirely client-side (no push, no server round-trip). A UTF-8 BOM keeps
+  // Chinese names readable in Excel; localized headers + department/title/status.
+  function exportCsv() {
+    if (!members || !members.length) return;
+    const esc = (v) => {
+      const s = v == null ? "" : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const headers = [
+      t("members.colName"), t("members.colEmp"), t("members.colDept"),
+      t("members.colTitle"), t("members.colEmail"), t("members.colStatus"),
+      t("members.employmentStatus"), t("members.colUserId"),
+    ];
+    const rows = members.map((m) => [
+      m.name || "",
+      m.employeeId || "",
+      m.department ? departmentLabel(m.department, lang) : "",
+      m.jobTitle ? jobTitleLabel(m.jobTitle, lang) : "",
+      m.email || "",
+      m.status === "registered" ? t("members.statusRegistered") : t("members.statusPending"),
+      m.status === "registered" ? (m.active === false ? t("members.inactive") : t("members.active")) : "",
+      m.lineUserId || "",
+    ]);
+    const csv = [headers, ...rows].map((r) => r.map(esc).join(",")).join("\r\n");
+    const d = new Date();
+    const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `members-${stamp}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={card}>
@@ -54,6 +92,12 @@ export default function Members({ go }) {
       </div>
 
       <div style={card}>
+        {members && members.length > 0 ? (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 14, fontWeight: 500, color: "var(--color-text-secondary)" }}>{t("members.count", { n: members.length })}</span>
+            <button onClick={exportCsv} style={{ ...btn(false), height: 32, fontSize: 13 }}>⤓ {t("members.export")}</button>
+          </div>
+        ) : null}
         {members === null ? <p style={{ color: "var(--color-text-secondary)" }}>{t("common.loading")}</p> : members.length === 0 ? (
           <p style={{ color: "var(--color-text-tertiary,#999)", margin: 0 }}>{t("members.none")}</p>
         ) : (

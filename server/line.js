@@ -243,6 +243,66 @@ function buildRemovalMessage(meeting, { deleted } = {}) {
     },
   };
 }
+// One consolidated notice for a batch of meetings (same title/time, many dates).
+export function buildBatchNoticeMessage({ title, location, startTime, endTime, dates = [] }) {
+  const t = title || "（未命名會議）";
+  const time = startTime ? (endTime ? `${startTime}–${endTime}` : startTime) : "";
+  const dateRows = dates.map((d) => ({ type: "text", text: `・${d}${time ? `　${time}` : ""}`, size: "sm", color: "#333333", wrap: true }));
+  const body = [];
+  if (location) body.push({ type: "text", text: `📍 ${location}`, size: "sm", color: "#666666", wrap: true });
+  body.push({ type: "text", text: `共 ${dates.length} 場 · Dates`, size: "xs", color: "#999999", margin: "md" });
+  body.push(...dateRows);
+  return {
+    type: "flex",
+    altText: `【會議通知】${t}（共 ${dates.length} 場）`.slice(0, 400),
+    contents: {
+      type: "bubble",
+      header: {
+        type: "box", layout: "vertical", backgroundColor: ACCENT, paddingAll: "16px",
+        contents: [
+          { type: "text", text: `📅 會議通知（共 ${dates.length} 場）`, color: "#FFFFFF", weight: "bold", size: "sm" },
+          { type: "text", text: t, color: "#FFFFFF", weight: "bold", size: "lg", wrap: true, margin: "sm" },
+        ],
+      },
+      body: { type: "box", layout: "vertical", spacing: "sm", paddingAll: "16px", contents: body },
+    },
+  };
+}
+// Flex card sent when a meeting's details are updated.
+export function buildUpdateMessage(meeting) {
+  const title = meeting.title || "（未命名會議）";
+  const datetime = meeting.datetime || "—";
+  const location = meeting.location || "";
+  const host = meeting.host || "";
+  const AMBER = "#854F0B";
+  const row = (label, value) => ({
+    type: "box", layout: "baseline", spacing: "sm",
+    contents: [
+      { type: "text", text: label, color: "#999999", size: "sm", flex: 2 },
+      { type: "text", text: value, color: "#333333", size: "sm", flex: 5, wrap: true },
+    ],
+  });
+  const rows = [row("時間 Time", datetime)];
+  if (location) rows.push(row("地點 Venue", location));
+  if (host) rows.push(row("主持 Host", host));
+  rows.push({ type: "separator", margin: "lg", color: "#EEEEEE" });
+  rows.push({ type: "text", text: "此會議已更新，請查看最新資訊。The meeting has been updated.", size: "sm", color: AMBER, weight: "bold", wrap: true, margin: "lg" });
+  return {
+    type: "flex",
+    altText: `【會議已更新】${title}｜${datetime}`.slice(0, 400),
+    contents: {
+      type: "bubble",
+      header: {
+        type: "box", layout: "vertical", backgroundColor: AMBER, paddingAll: "16px",
+        contents: [
+          { type: "text", text: "🔄 會議已更新 Updated", color: "#FFFFFF", weight: "bold", size: "sm" },
+          { type: "text", text: title, color: "#FFFFFF", weight: "bold", size: "lg", wrap: true, margin: "sm" },
+        ],
+      },
+      body: { type: "box", layout: "vertical", spacing: "md", paddingAll: "16px", contents: rows },
+    },
+  };
+}
 export function buildCancelMessage(meeting) { return buildRemovalMessage(meeting, { deleted: false }); }
 export function buildDeleteMessage(meeting) { return buildRemovalMessage(meeting, { deleted: true }); }
 

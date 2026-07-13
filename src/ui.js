@@ -54,6 +54,28 @@ export const btn = (primary) => ({
   color: primary ? "#fff" : "var(--color-text-primary, #111)",
 });
 
+// Soft tinted action button — a gentle color-tinted chip with matching text and
+// no harsh border. Matches the pill/avatar aesthetic so row actions
+// (取消 / 刪除 / 還原 / 永久刪除) sit with the violet card theme instead of
+// reading as loud outlined buttons. Pass a semantic color (RED / GREEN / ACCENT).
+export const softBtn = (color) => ({
+  height: 32,
+  padding: "0 14px",
+  fontSize: 13,
+  fontWeight: 500,
+  borderRadius: 8,
+  cursor: "pointer",
+  border: "none",
+  background: color + "16",
+  color,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 5,
+  whiteSpace: "nowrap",
+  lineHeight: 1,
+});
+
 export const pill = (bg, fg) => ({
   display: "inline-block",
   padding: "2px 10px",

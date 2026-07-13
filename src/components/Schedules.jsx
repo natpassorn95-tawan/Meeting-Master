@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { api } from "../api.js";
-import { ACCENT, GREEN, RED, card, label, input, btn, pill } from "../ui.js";
+import { ACCENT, GREEN, RED, AMBER, card, label, input, btn, pill, softBtn } from "../ui.js";
 import { useT, recurrenceTextI18n, fmtDateTimeI18n, ordinalText } from "../i18n.jsx";
 
 const NTHS = [1, 2, 3, 4, 5];
@@ -101,7 +101,7 @@ export function ScheduleList({ go, reloadToken, onMutated }) {
                 {!isPassed ? (
                   <div style={{ display: "flex", gap: 6 }}>
                     <button onClick={() => toggle(s)} style={{ ...btn(false), height: 30, fontSize: 12 }}>{s.enabled ? t("sched.disable") : t("sched.enable")}</button>
-                    <button onClick={() => remove(s.id)} style={{ ...btn(false), height: 30, fontSize: 12, color: RED, borderColor: RED + "55" }}>{t("common.delete")}</button>
+                    <button onClick={() => remove(s.id)} style={{ ...softBtn(RED), height: 30 }}>{t("common.delete")}</button>
                   </div>
                 ) : null}
               </div>
@@ -134,19 +134,52 @@ export function ScheduleList({ go, reloadToken, onMutated }) {
 // admin selected on the calendar (drag for a range): one date → a single meeting
 // (freq still switchable to weekly/monthly); multiple dates → a one-time meeting
 // is created on each selected day. Self-loads its recipient pool from Members.
-export function CreateForm({ dates = [], onCreated, onClose, setError }) {
+export function CreateForm({ dates = [], editMeeting = null, editId = null, onCreated, onClose, setError }) {
   const { t, lang, weekdayFull } = useT();
-  const multi = dates.length > 1;
+  const editing = !!editMeeting;
+  const multi = !editing && dates.length > 1;
   const [pool, setPool] = useState([]);
-  const [f, setF] = useState({
+  const [f, setF] = useState(editing ? {
+    title: editMeeting.title || "", location: editMeeting.location || "", host: editMeeting.host || "",
+    startTime: editMeeting.startTime || "14:00", endTime: editMeeting.endTime || "15:30",
+    freq: "once", weekday: 5, nth: 1, date: editMeeting.date || "", startDate: "", endDate: "", leads: [15],
+    topics: (editMeeting.topics || []).map((tp) => tp.title).join("\n"),
+    visibility: editMeeting.visibility || "public",
+  } : {
     title: "", location: "", host: "", startTime: "14:00", endTime: "15:30",
     freq: "weekly", weekday: 5, nth: 1, date: "", startDate: "", endDate: "", leads: [15], topics: "",
     visibility: "public",
   });
   const [recipients, setRecipients] = useState([]);
   const [saving, setSaving] = useState(false);
-  const [attachments, setAttachments] = useState([]); // [{ url, name, type, size }]
+  const [attachments, setAttachments] = useState(editMeeting?.attachments || []); // [{ url, name, type, size }]
   const [uploading, setUploading] = useState(false);
+  const [conflicts, setConflicts] = useState([]); // [{ name, conflicts:[{date,title,startTime,endTime}] }]
+  const [checkingConflicts, setCheckingConflicts] = useState(false);
+
+  // Conflict dates: a one-time meeting's date, an edit's date, or every day of a
+  // multi-day batch. Recurring (weekly/monthly) is skipped — too many occurrences
+  // to warn on usefully.
+  const conflictDates = editing ? [f.date]
+    : multi ? dates
+    : (f.freq === "once" && f.date ? [f.date] : []);
+
+  // Live, debounced conflict check as the creator picks time / recipients / date.
+  useEffect(() => {
+    const names = pool.filter((p) => recipients.includes(p.id)).map((p) => p.name);
+    const dayList = conflictDates.filter(Boolean);
+    if (!dayList.length || !f.startTime || !names.length) { setConflicts([]); setCheckingConflicts(false); return; }
+    setCheckingConflicts(true);
+    const h = setTimeout(async () => {
+      try {
+        const r = await api.checkConflicts({ dates: dayList, startTime: f.startTime, endTime: f.endTime, names, excludeMeetingId: editing ? editId : undefined });
+        setConflicts(Array.isArray(r) ? r : []);
+      } catch { setConflicts([]); }
+      finally { setCheckingConflicts(false); }
+    }, 400);
+    return () => clearTimeout(h);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conflictDates.join(","), f.startTime, f.endTime, recipients.join(","), pool.length]);
 
   // Recipient pool = registered Members (aligned with the Members page).
   useEffect(() => {
@@ -156,14 +189,16 @@ export function CreateForm({ dates = [], onCreated, onClose, setError }) {
           id: m.lineUserId, name: m.name, dept: m.employeeId || "—", lineUserId: m.lineUserId,
         }));
         setPool(p);
-        setRecipients(p.map((x) => x.id));
+        if (editing) setRecipients((editMeeting.roster || []).map((r) => r.lineUserId).filter(Boolean));
+        else setRecipients(p.map((x) => x.id));
       })
       .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // A single clicked date → default to a one-time meeting on that date.
   useEffect(() => {
-    if (dates.length === 1) setF((prev) => ({ ...prev, freq: "once", date: dates[0] }));
+    if (!editing && dates.length === 1) setF((prev) => ({ ...prev, freq: "once", date: dates[0] }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dates.join(",")]);
 
@@ -192,8 +227,21 @@ export function CreateForm({ dates = [], onCreated, onClose, setError }) {
 
   async function create() {
     if (!f.title.trim()) { setError(t("sched.errTitle")); return; }
-    if (!multi && f.freq === "once" && !f.date) { setError(t("sched.errDate")); return; }
     if (f.endTime && f.startTime >= f.endTime) { setError(t("sched.errTime")); return; } // start must be before end
+    if (editing) {
+      setSaving(true); setError("");
+      try {
+        await api.updateMeta(editId, { title: f.title.trim(), location: f.location.trim(), host: f.host.trim(), date: f.date, startTime: f.startTime, endTime: f.endTime, visibility: f.visibility, attachments });
+        await api.setTopics(editId, f.topics.split("\n").map((x) => x.trim()).filter(Boolean).map((title) => ({ title })));
+        await api.setRoster(editId, pool.filter((p) => recipients.includes(p.id)).map((p) => ({ name: p.name, dept: p.dept, lineUserId: p.lineUserId })));
+        const r = await api.notifyUpdate(editId).catch(() => ({ pushed: 0 }));
+        onCreated(); onClose();
+        alert(t("hostcal.editDone", { pushed: r?.pushed || 0 }));
+      } catch (e) { setError(e.message); }
+      finally { setSaving(false); }
+      return;
+    }
+    if (!multi && f.freq === "once" && !f.date) { setError(t("sched.errDate")); return; }
     setSaving(true); setError("");
     const base = {
       title: f.title.trim(), location: f.location.trim(), host: f.host.trim(),
@@ -206,19 +254,24 @@ export function CreateForm({ dates = [], onCreated, onClose, setError }) {
     };
     try {
       let notified = 0;
-      const tally = (r) => { if (r?.notify) notified += r.notify.count || 0; };
       if (multi) {
-        // One one-time meeting per selected day.
+        // One one-time meeting per selected day, created SILENTLY, then a single
+        // consolidated notice for the whole batch (not one per day).
+        const ids = [];
         for (const d of dates) {
-          tally(await api.createSchedule({ ...base, recurrence: { freq: "once", weekday: 0, nth: 1, date: d }, startDate: "", endDate: "" }));
+          const r = await api.createSchedule({ ...base, recurrence: { freq: "once", weekday: 0, nth: 1, date: d }, startDate: "", endDate: "", silent: true });
+          if (r?.id) ids.push(r.id);
         }
+        const nb = await api.notifyBatch(ids).catch(() => null);
+        notified = nb?.pushed || 0;
       } else {
-        tally(await api.createSchedule({
+        const r = await api.createSchedule({
           ...base,
           recurrence: { freq: f.freq, weekday: Number(f.weekday), nth: Number(f.nth), date: f.date },
           startDate: f.freq === "once" ? "" : f.startDate,
           endDate: f.freq === "once" ? "" : f.endDate,
-        }));
+        });
+        notified = r?.notify?.count || 0;
       }
       setF({ ...f, title: "" }); setAttachments([]);
       alert(notified > 0 ? t("sched.notified", { count: notified }) : t("sched.notifyNone"));
@@ -230,7 +283,7 @@ export function CreateForm({ dates = [], onCreated, onClose, setError }) {
   const selStyle = { ...input, appearance: "auto" };
   return (
     <div>
-      <h3 style={{ margin: "0 0 16px", fontSize: 18, fontWeight: 500 }}>{multi ? t("sched.createTitleMulti", { n: dates.length }) : t("sched.createTitle")}</h3>
+      <h3 style={{ margin: "0 0 16px", fontSize: 18, fontWeight: 500 }}>{editing ? t("hostcal.editTitle") : multi ? t("sched.createTitleMulti", { n: dates.length }) : t("sched.createTitle")}</h3>
 
       <label style={label}>{t("sched.title")}</label>
       <input style={input} value={f.title} onChange={set("title")} placeholder={t("sched.titlePlaceholder")} autoFocus />
@@ -256,7 +309,12 @@ export function CreateForm({ dates = [], onCreated, onClose, setError }) {
       <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-text-tertiary,#999)" }}>{f.visibility === "private" ? t("sched.privateHint") : t("sched.publicHint")}</p>
 
       <div style={{ height: 14 }} />
-      {multi ? (
+      {editing ? (
+        <>
+          <label style={label}>{t("hostcal.editDate")}</label>
+          <input type="date" style={{ ...selStyle }} value={f.date} onChange={set("date")} />
+        </>
+      ) : multi ? (
         <>
           <label style={label}>{t("sched.selectedDates", { n: dates.length })}</label>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -315,18 +373,22 @@ export function CreateForm({ dates = [], onCreated, onClose, setError }) {
         <p style={{ margin: "6px 0 0", fontSize: 12, color: RED }}>⚠ {t("sched.errTime")}</p>
       ) : null}
 
-      <div style={{ height: 14 }} />
-      <label style={label}>{t("sched.timing")}</label>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-        {LEADS.map((v) => {
-          const on = f.leads.includes(v);
-          return (
-            <button key={v} onClick={() => toggleLead(v)} style={{ height: 34, padding: "0 12px", fontSize: 13, borderRadius: 999, cursor: "pointer", border: on ? "none" : "0.5px solid rgba(0,0,0,.25)", background: on ? ACCENT : "transparent", color: on ? "#fff" : "var(--color-text-primary)" }}>
-              {on ? "✓ " : ""}{t(`lead.${v}`)}
-            </button>
-          );
-        })}
-      </div>
+      {!editing ? (
+        <>
+          <div style={{ height: 14 }} />
+          <label style={label}>{t("sched.timing")}</label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {LEADS.map((v) => {
+              const on = f.leads.includes(v);
+              return (
+                <button key={v} onClick={() => toggleLead(v)} style={{ height: 34, padding: "0 12px", fontSize: 13, borderRadius: 999, cursor: "pointer", border: on ? "none" : "0.5px solid rgba(0,0,0,.25)", background: on ? ACCENT : "transparent", color: on ? "#fff" : "var(--color-text-primary)" }}>
+                  {on ? "✓ " : ""}{t(`lead.${v}`)}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      ) : null}
 
       <div style={{ height: 14 }} />
       <label style={label}>{t("sched.recipientsLabel", { a: recipients.length, b: pool.length })}</label>
@@ -351,11 +413,38 @@ export function CreateForm({ dates = [], onCreated, onClose, setError }) {
         </div>
       ) : null}
 
+      {conflicts.length ? (
+        <>
+          <div style={{ height: 14 }} />
+          <div style={{ padding: "12px 14px", borderRadius: 10, background: AMBER + "12", border: `0.5px solid ${AMBER}44` }}>
+            <p style={{ margin: "0 0 8px", fontSize: 13, fontWeight: 600, color: AMBER }}>⚠ {t("sched.conflictTitle")}</p>
+            <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--color-text-secondary)" }}>{t("sched.conflictDesc")}</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {conflicts.map((c) => (
+                <div key={c.name} style={{ fontSize: 13 }}>
+                  <span style={{ fontWeight: 600 }}>{c.name}</span>
+                  <div style={{ marginTop: 2, display: "flex", flexDirection: "column", gap: 2 }}>
+                    {c.conflicts.map((x, i) => (
+                      <span key={i} style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>
+                        ・{x.title || "（未命名會議）"}　<span style={{ color: AMBER, fontWeight: 500 }}>{multi || editing ? `${x.date} ` : ""}{x.startTime}{x.endTime ? `–${x.endTime}` : ""}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--color-text-tertiary,#999)" }}>{t("sched.conflictNote")}</p>
+          </div>
+        </>
+      ) : checkingConflicts ? (
+        <><div style={{ height: 10 }} /><p style={{ margin: 0, fontSize: 12, color: "var(--color-text-tertiary,#999)" }}>{t("sched.conflictChecking")}</p></>
+      ) : null}
+
       <div style={{ height: 18 }} />
       <div style={{ display: "flex", gap: 8 }}>
         {(() => { const badTime = !!f.endTime && f.startTime >= f.endTime; return (
           <button onClick={create} disabled={saving || badTime} style={{ ...btn(true), flex: 1, opacity: saving || badTime ? 0.5 : 1 }}>
-            {saving ? t("sched.creating") : multi ? t("sched.createMulti", { n: dates.length }) : t("sched.create")}
+            {editing ? (saving ? t("hostcal.editSaving") : t("hostcal.editSave")) : saving ? t("sched.creating") : multi ? t("sched.createMulti", { n: dates.length }) : t("sched.create")}
           </button>
         ); })()}
         <button onClick={onClose} style={{ ...btn(false), flex: "0 0 100px" }}>{t("common.cancel")}</button>

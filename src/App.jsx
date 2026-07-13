@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { api } from "./api.js";
-import { ACCENT, GREEN, RED } from "./ui.js";
+import { ACCENT, GREEN, RED, avatar } from "./ui.js";
 import { useT } from "./i18n.jsx";
 import HostDashboard from "./components/HostDashboard.jsx";
 import Invite from "./components/Invite.jsx";
@@ -172,8 +172,9 @@ function Header({ status, view, go, showNav, userName, onSwitch }) {
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <LineDot status={status} />
             {userName ? (
-              <button onClick={onSwitch} title={t("identity.switch")} style={{ height: 30, padding: "0 10px", fontSize: 12, borderRadius: 7, border: "0.5px solid rgba(0,0,0,.2)", background: "transparent", cursor: "pointer", color: "var(--color-text-secondary)", whiteSpace: "nowrap" }}>
-                👤 {userName} ⇄
+              <button onClick={onSwitch} title={t("identity.switch")} style={{ display: "inline-flex", alignItems: "center", gap: 8, height: 34, padding: "0 12px 0 6px", fontSize: 13, fontWeight: 500, borderRadius: 999, border: "0.5px solid rgba(0,0,0,.12)", background: "#fff", cursor: "pointer", color: "var(--color-text-primary)", whiteSpace: "nowrap" }}>
+                <span style={{ ...avatar(userName).wrap, width: 24, height: 24, fontSize: 12 }}>{avatar(userName).letter}</span>
+                {userName}
               </button>
             ) : null}
           </div>
@@ -205,10 +206,17 @@ function LineDot({ status }) {
   if (status === null) return <span style={{ fontSize: 12, color: "var(--color-text-tertiary)" }}>{t("line.checking")}</span>;
   if (status.connected) {
     return (
-      <span style={{ fontSize: 12, color: "var(--color-text-secondary)", whiteSpace: "nowrap" }}>
-        <span style={{ color: GREEN }}>●</span> {status.displayName} {status.basicId}
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 7, height: 34, padding: "0 12px", borderRadius: 999, background: "#fff", border: "0.5px solid rgba(0,0,0,.12)", fontSize: 12, color: "var(--color-text-secondary)", whiteSpace: "nowrap" }}>
+        <span style={{ width: 8, height: 8, borderRadius: 999, background: GREEN, flexShrink: 0 }} />
+        {status.displayName}
+        <span style={{ color: "var(--color-text-tertiary,#999)" }}>{status.basicId}</span>
       </span>
     );
   }
-  return <span style={{ fontSize: 12, color: RED }}>{t("line.notConnected")}</span>;
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 7, height: 34, padding: "0 12px", borderRadius: 999, background: "#fff", border: `0.5px solid ${RED}33`, fontSize: 12, color: RED, whiteSpace: "nowrap" }}>
+      <span style={{ width: 8, height: 8, borderRadius: 999, background: RED, flexShrink: 0 }} />
+      {t("line.notConnected")}
+    </span>
+  );
 }

@@ -205,6 +205,8 @@ function updateMeetingMeta(id, patch) {
   for (const k of ["title", "location", "host", "date", "startTime", "endTime"]) {
     if (patch[k] != null) m[k] = patch[k];
   }
+  if (patch.visibility === "public" || patch.visibility === "private") m.visibility = patch.visibility;
+  if (Array.isArray(patch.attachments)) m.attachments = patch.attachments;
   m.datetime = m.date ? fmtDatetime(m.date, m.startTime, m.endTime) : (patch.datetime ?? m.datetime);
   return m;
 }
@@ -598,6 +600,24 @@ function listCancelled() {
   return Object.values(store.cancelled).sort((a, b) => (b.cancelledAt || 0) - (a.cancelledAt || 0));
 }
 
+// ── Auto-purge of removed meetings ─────────────────────────────────────
+// Removed (cancelled or deleted) meetings sit in a trash bucket until restored.
+// If nobody acts on one for longer than REMOVED_TTL_MS (10 days from the moment
+// it was removed), it is permanently purged (tombstoned). Restoring clears the
+// stamp — the item leaves the bucket — so the 10-day clock only runs while it
+// stays removed. Called from the scheduler tick.
+const REMOVED_TTL_MS = 10 * 24 * 60 * 60 * 1000; // 10 days
+function purgeExpiredRemoved(now = Date.now(), maxAgeMs = REMOVED_TTL_MS) {
+  const purged = [];
+  for (const [id, m] of Object.entries(store.deleted)) {
+    if (m.deletedAt && now - m.deletedAt > maxAgeMs) { delete store.deleted[id]; tombstone(id); purged.push(id); }
+  }
+  for (const [id, m] of Object.entries(store.cancelled)) {
+    if (m.cancelledAt && now - m.cancelledAt > maxAgeMs) { delete store.cancelled[id]; tombstone(id); purged.push(id); }
+  }
+  return purged;
+}
+
 // ── Tombstones ─────────────────────────────────────────────────────────
 // Permanently deleting a schedule occurrence leaves a tombstone so the still-
 // enabled schedule never re-projects (resurrects) that occurrence again. Only
@@ -615,7 +635,7 @@ function isTrashed(id) {
   return !!store.deleted[id] || !!store.cancelled[id] || !!store.tombstones[id];
 }
 
-export { ymd, nextOccurrence, occurrencesInRange, recurrenceSummary, decorateSchedule, createSchedule, listSchedules, getSchedule, updateSchedule, deleteSchedule, trashMeeting, restoreMeeting, purgeMeeting, listDeleted, cancelMeeting, restoreCancelled, purgeCancelled, listCancelled, isTrashed, isTombstoned };
+export { ymd, nextOccurrence, occurrencesInRange, recurrenceSummary, decorateSchedule, createSchedule, listSchedules, getSchedule, updateSchedule, deleteSchedule, trashMeeting, restoreMeeting, purgeMeeting, listDeleted, cancelMeeting, restoreCancelled, purgeCancelled, listCancelled, purgeExpiredRemoved, REMOVED_TTL_MS, isTrashed, isTombstoned };
 
 // A participant's meetings (by name). One row per schedule = the NEAREST
 // upcoming occurrence (weekly/monthly collapse to a single row); one-time
@@ -677,6 +697,51 @@ function memberUpcoming(name, fromMs, toMs) {
   const key = (x) => `${x.date}T${x.startTime || "00:00"}`;
   out.sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
   return out;
+}
+
+// Scheduling-conflict detection: for each proposed attendee (by name), find
+// existing meetings on the given date(s) whose time window overlaps
+// [startTime, endTime]. Skips the meeting being edited, permanently-removed /
+// cancelled / deleted occurrences, and anyone already on leave for the clashing
+// meeting. Used to warn the creator before a notice goes out. Non-blocking.
+function findConflicts({ dates, startTime, endTime, names, excludeMeetingId }) {
+  const dayList = [...new Set((dates || []).filter(Boolean))];
+  const who = new Set((names || []).filter(Boolean));
+  if (!dayList.length || !who.size) return [];
+  const toMin = (s, def) => { const [h, m] = (s || "").split(":").map(Number); return Number.isFinite(h) ? h * 60 + (m || 0) : def; };
+  const aS = toMin(startTime, 0), aE = toMin(endTime, aS + 60);
+  const overlaps = (bStart, bEnd) => { const bS = toMin(bStart, 0), bE = toMin(bEnd, bS + 60); return aS < bE && bS < aE; };
+  const byName = new Map();
+  const add = (name, c) => { if (!byName.has(name)) byName.set(name, []); byName.get(name).push(c); };
+
+  for (const date of dayList) {
+    // Standalone / materialised meetings landing on this date.
+    for (const m of listMeetings()) {
+      if (m.date !== date || (excludeMeetingId && m.id === excludeMeetingId)) continue;
+      if (!overlaps(m.startTime, m.endTime)) continue;
+      for (const p of m.roster) {
+        if (!who.has(p.name) || m.responses[p.id]?.rsvp === "leave") continue;
+        add(p.name, { date, title: m.title, startTime: m.startTime, endTime: m.endTime });
+      }
+    }
+    // Recurring-schedule occurrences on this date (not yet materialised).
+    const dayStart = Date.parse(`${date}T00:00:00`);
+    const dayEnd = Date.parse(`${date}T23:59:59`);
+    for (const s of Object.values(store.schedules)) {
+      if (!s.enabled) continue;
+      const occId = `${s.id}__${date}`;
+      if ((excludeMeetingId && occId === excludeMeetingId) || getMeeting(occId)) continue; // materialised → counted above
+      if (store.tombstones[occId] || store.cancelled[occId] || store.deleted[occId]) continue;
+      const occs = occurrencesInRange(s, dayStart, dayEnd);
+      if (!occs.some((o) => ymd(o) === date) || !overlaps(s.startTime, s.endTime)) continue;
+      const rec = s.recipientIds?.length ? s.roster.filter((p) => s.recipientIds.includes(p.id)) : s.roster;
+      for (const p of rec) {
+        if (!who.has(p.name) || getStanding(s.id, p.name) === "leave") continue;
+        add(p.name, { date, title: s.title, startTime: s.startTime, endTime: s.endTime });
+      }
+    }
+  }
+  return [...byName.entries()].map(([name, conflicts]) => ({ name, conflicts }));
 }
 
 const HOURS_WARNING = 20; // meeting-hours threshold over the selected window
@@ -753,6 +818,7 @@ export {
   memberUpcoming,
   memberMonthlySummary,
   memberRangeSummary,
+  findConflicts,
   scheduleIdOf,
   getStanding,
   setStanding,

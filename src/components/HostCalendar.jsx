@@ -1,8 +1,12 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { api } from "../api.js";
-import { ACCENT, GREEN, RED, BROWN, card, btn, pill } from "../ui.js";
+import { ACCENT, GREEN, RED, BROWN, AMBER, card, btn, pill, softBtn } from "../ui.js";
 import { useT, fmtDateTimeI18n } from "../i18n.jsx";
 import { CreateForm } from "./Schedules.jsx";
+
+// Removed meetings auto-purge after this long untouched (mirrors the server's
+// REMOVED_TTL_MS in server/store.js). Used only to render the countdown.
+const REMOVED_TTL_MS = 10 * 24 * 60 * 60 * 1000; // 10 days
 
 const WD = { zh: ["日", "一", "二", "三", "四", "五", "六"], en: ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"] };
 const ymd = (y, m, d) => `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
@@ -32,10 +36,10 @@ export default function HostCalendar({ go }) {
   const [deleted, setDeleted] = useState([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [showCancelled, setShowCancelled] = useState(false);
-  const [showDeleted, setShowDeleted] = useState(false);
+  const [showRemoved, setShowRemoved] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [createDates, setCreateDates] = useState([]);
+  const [editMeeting, setEditMeeting] = useState(null); // { id, meeting } for the edit popup
   const today = new Date();
   const todayStr = ymd(today.getFullYear(), today.getMonth(), today.getDate());
   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
@@ -116,6 +120,15 @@ export default function HostCalendar({ go }) {
     if (!confirm(t("hostcal.deleteConfirm", { title: ev.title || "" }))) return;
     act(async () => { await api.trashMeeting(await meetingIdOf(ev)); });
   }
+  async function editEvent(ev) {
+    setBusy(true); setError("");
+    try {
+      const id = await meetingIdOf(ev);
+      const m = await api.getMeeting(id);
+      setEditMeeting({ id, meeting: m });
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  }
 
   // Drag-select handlers (mouse + touch).
   function dayDown(ds) { setDragging(true); setRange({ start: ds, end: ds }); }
@@ -150,6 +163,13 @@ export default function HostCalendar({ go }) {
   const selectedDates = expandRange(rs, re);
   const multiSel = selectedDates.length > 1;
   const dayEvents = events.filter((e) => inRange(e.date)).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
+  // Cancelled + deleted merged into one "removed" list, tagged by origin so
+  // Restore hits the right endpoint. Most-recently-dated first.
+  const removed = [
+    ...cancelled.map((m) => ({ ...m, _kind: "cancelled" })),
+    ...deleted.map((m) => ({ ...m, _kind: "deleted" })),
+  ].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 
   function openCreate() { setCreateDates(selectedDates); setCreateOpen(true); }
 
@@ -240,42 +260,24 @@ export default function HostCalendar({ go }) {
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {dayEvents.map((ev, idx) => (
-              <EventRow key={idx} ev={ev} past={ev.date < todayStr} t={t} lang={lang} busy={busy} onOpen={open} onCancel={cancelEvent} onDelete={deleteEvent} />
+              <EventRow key={idx} ev={ev} past={ev.date < todayStr} t={t} lang={lang} busy={busy} onOpen={open} onEdit={editEvent} onCancel={cancelEvent} onDelete={deleteEvent} />
             ))}
           </div>
         )}
       </div>
 
-      {/* Folder: cancelled meetings (restore / permanent delete) */}
+      {/* Folder: removed meetings — cancelled + deleted merged, one Restore each */}
       <div style={card}>
-        <FolderHeader icon="🚫" label={`${t("hostcal.cancelledFolder")} (${cancelled.length})`} open={showCancelled} onToggle={() => setShowCancelled((v) => !v)} />
-        {showCancelled ? (
-          cancelled.length === 0 ? (
-            <p style={{ margin: "12px 0 0", fontSize: 14, color: "var(--color-text-tertiary,#999)" }}>{t("hostcal.emptyCancelled")}</p>
+        <FolderHeader label={t("hostcal.removedFolder")} count={removed.length} tone={BROWN} open={showRemoved} onToggle={() => setShowRemoved((v) => !v)} />
+        {showRemoved ? (
+          removed.length === 0 ? (
+            <p style={{ margin: "12px 0 0", fontSize: 14, color: "var(--color-text-tertiary,#999)" }}>{t("hostcal.emptyRemoved")}</p>
           ) : (
             <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-              {cancelled.map((m) => (
-                <TrashRow key={m.id} m={m} t={t} lang={lang} busy={busy}
-                  onRestore={() => act(() => api.restoreCancelled(m.id))}
-                  onPurge={() => { if (confirm(t("hostcal.purgeConfirm"))) act(() => api.purgeCancelled(m.id)); }} />
-              ))}
-            </div>
-          )
-        ) : null}
-      </div>
-
-      {/* Folder: deleted meetings (restore / permanent delete) */}
-      <div style={card}>
-        <FolderHeader icon="🗑" label={`${t("hostcal.deletedFolder")} (${deleted.length})`} open={showDeleted} onToggle={() => setShowDeleted((v) => !v)} />
-        {showDeleted ? (
-          deleted.length === 0 ? (
-            <p style={{ margin: "12px 0 0", fontSize: 14, color: "var(--color-text-tertiary,#999)" }}>{t("hostcal.emptyDeleted")}</p>
-          ) : (
-            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-              {deleted.map((m) => (
-                <TrashRow key={m.id} m={m} t={t} lang={lang} busy={busy}
-                  onRestore={() => act(() => api.restoreMeeting(m.id))}
-                  onPurge={() => { if (confirm(t("hostcal.purgeConfirm"))) act(() => api.purgeMeeting(m.id)); }} />
+              <p style={{ margin: 0, fontSize: 12, color: "var(--color-text-tertiary,#999)" }}>ⓘ {t("hostcal.removedNote")}</p>
+              {removed.map((m) => (
+                <TrashRow key={`${m._kind}-${m.id}`} m={m} t={t} lang={lang} busy={busy}
+                  onRestore={() => act(() => m._kind === "cancelled" ? api.restoreCancelled(m.id) : api.restoreMeeting(m.id))} />
               ))}
             </div>
           )
@@ -298,37 +300,62 @@ export default function HostCalendar({ go }) {
           </div>
         </div>
       ) : null}
+
+      {/* Edit popup */}
+      {editMeeting ? (
+        <div onClick={() => setEditMeeting(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "5vh 12px", zIndex: 1000, overflowY: "auto" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ ...card, width: "100%", maxWidth: 560, margin: 0 }}>
+            <CreateForm editMeeting={editMeeting.meeting} editId={editMeeting.id} onCreated={load} onClose={() => setEditMeeting(null)} setError={setError} />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function FolderHeader({ icon, label, open, onToggle }) {
+
+function FolderHeader({ label, count, tone, open, onToggle }) {
   return (
     <button onClick={onToggle} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", border: "none", background: "transparent", cursor: "pointer", fontSize: 15, fontWeight: 500, color: "var(--color-text-primary)", padding: 0 }}>
-      <span>{icon} {label}</span>
-      <span style={{ color: "var(--color-text-tertiary,#999)" }}>{open ? "▲" : "▼"}</span>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+        {label}
+        <span style={{ ...pill(tone + "16", tone), minWidth: 22, textAlign: "center", fontVariantNumeric: "tabular-nums" }}>{count}</span>
+      </span>
+      <span style={{ color: "var(--color-text-tertiary,#999)", fontSize: 11 }}>{open ? "▲" : "▼"}</span>
     </button>
   );
 }
 
-function TrashRow({ m, t, lang, busy, onRestore, onPurge }) {
+function TrashRow({ m, t, lang, busy, onRestore }) {
+  const kind = m._kind === "cancelled"
+    ? { label: t("hostcal.tagCancelled"), tone: RED }
+    : { label: t("hostcal.tagDeleted"), tone: BROWN };
+  // Auto-purge countdown: 10 days from when it was removed.
+  const removedAt = m.cancelledAt || m.deletedAt || 0;
+  const msLeft = removedAt + REMOVED_TTL_MS - Date.now();
+  const daysLeft = Math.ceil(msLeft / 86400000);
+  const purgeLabel = daysLeft <= 1 ? t("hostcal.autoPurgeSoon") : t("hostcal.autoPurgeIn", { n: daysLeft });
+  const purgeTone = daysLeft <= 3 ? RED : AMBER;
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 12px", border: "0.5px solid rgba(0,0,0,.12)", borderRadius: 10, flexWrap: "wrap" }}>
       <div style={{ minWidth: 0 }}>
-        <p style={{ margin: 0, fontSize: 15, fontWeight: 500, color: "var(--color-text-secondary)" }}>{m.title || "（未命名會議）"}</p>
-        <p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--color-text-tertiary,#999)" }}>
-          {fmtDateTimeI18n(m.date, m.startTime, m.endTime, lang)}{m.location ? `・${m.location}` : ""}
+        <p style={{ margin: 0, fontSize: 15, fontWeight: 500, color: "var(--color-text-secondary)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {m.title || "（未命名會議）"}
+          <span style={pill(kind.tone + "16", kind.tone)}>{kind.label}</span>
+        </p>
+        <p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--color-text-tertiary,#999)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span>{fmtDateTimeI18n(m.date, m.startTime, m.endTime, lang)}{m.location ? `・${m.location}` : ""}</span>
+          {removedAt ? <span style={pill(purgeTone + "16", purgeTone)}>⏳ {purgeLabel}</span> : null}
         </p>
       </div>
-      <div style={{ display: "flex", gap: 6 }}>
-        <button onClick={onRestore} disabled={busy} style={{ ...btn(false), height: 30, fontSize: 12, color: GREEN, borderColor: GREEN + "55" }}>↩ {t("hostcal.restore")}</button>
-        <button onClick={onPurge} disabled={busy} style={{ ...btn(false), height: 30, fontSize: 12, color: RED, borderColor: RED + "55" }}>{t("hostcal.purge")}</button>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={onRestore} disabled={busy} style={{ ...softBtn(GREEN), opacity: busy ? 0.5 : 1 }}>↩ {t("hostcal.restore")}</button>
       </div>
     </div>
   );
 }
 
-function EventRow({ ev, past, t, lang, busy, onOpen, onCancel, onDelete }) {
+function EventRow({ ev, past, t, lang, busy, onOpen, onEdit, onCancel, onDelete }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 12px", border: "0.5px solid rgba(0,0,0,.12)", borderRadius: 10, flexWrap: "wrap", background: "#fff" }}>
       <button onClick={() => onOpen(ev)} disabled={busy} style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2, background: "transparent", border: "none", cursor: "pointer", textAlign: "left", padding: 0 }}>
@@ -343,12 +370,15 @@ function EventRow({ ev, past, t, lang, busy, onOpen, onCancel, onDelete }) {
           {"  "}<span style={{ ...pill("#EDEBF7", ACCENT), marginLeft: 6 }}>{ev.count} 人</span>
         </span>
       </button>
-      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         {!past ? (
-          <button onClick={() => onCancel(ev)} disabled={busy} style={{ ...btn(false), height: 32, fontSize: 12, color: RED, borderColor: RED + "55" }}>{t("hostcal.cancelEvent")}</button>
+          <button onClick={() => onEdit(ev)} disabled={busy} style={{ ...softBtn(ACCENT), opacity: busy ? 0.5 : 1 }}>{t("hostcal.editEvent")}</button>
         ) : null}
-        <button onClick={() => onDelete(ev)} disabled={busy} title={t("hostcal.deleteEvent")} style={{ ...btn(false), height: 32, width: 36, fontSize: 14, padding: 0, color: RED, borderColor: RED + "55" }}>🗑</button>
-        <span onClick={() => !busy && onOpen(ev)} style={{ ...btn(true), height: 32, fontSize: 12, display: "inline-flex", alignItems: "center", cursor: busy ? "default" : "pointer" }}>{t("hostcal.open")}</span>
+        {!past ? (
+          <button onClick={() => onCancel(ev)} disabled={busy} style={{ ...softBtn(RED), opacity: busy ? 0.5 : 1 }}>{t("hostcal.cancelEvent")}</button>
+        ) : null}
+        <button onClick={() => onDelete(ev)} disabled={busy} style={{ ...softBtn(RED), opacity: busy ? 0.5 : 1 }}>{t("hostcal.deleteEvent")}</button>
+        <span onClick={() => !busy && onOpen(ev)} style={{ ...btn(true), height: 32, fontSize: 13, display: "inline-flex", alignItems: "center", cursor: busy ? "default" : "pointer" }}>{t("hostcal.open")}</span>
       </div>
     </div>
   );

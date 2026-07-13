@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 2500px; height: 1686px; }
+  body {
+    background: #26215C;
+    font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .canvas { position: relative; width: 2500px; height: 1686px; padding: 30px; }
+
+  /* ---- Header (y 0–258) ---- */
+  .header { position: absolute; left: 40px; right: 40px; top: 30px; height: 200px;
+    display: flex; align-items: center; justify-content: space-between; }
+  .brand { display: flex; align-items: baseline; gap: 34px; }
+  .brand .name { font-size: 128px; font-weight: 800; color: #FFFFFF; letter-spacing: 3px; }
+  .brand .sub  { font-size: 62px; font-weight: 700; color: #B7B0F2; }
+  .help { display: flex; align-items: center; gap: 22px; padding: 28px 60px;
+    border: 3px solid #6B62C9; border-radius: 999px; background: rgba(83,74,183,.32); }
+  .help .t { font-size: 64px; font-weight: 800; color: #E7E5FB; }
+  .help .q { width: 72px; height: 72px; border-radius: 999px; border: 5px solid #E7E5FB;
+    color: #E7E5FB; font-size: 50px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+
+  /* ---- Row 1 (y 258–1038): 2:1 ---- */
+  .row1 { position: absolute; left: 30px; top: 258px; width: 2440px; height: 782px; display: flex; gap: 22px; }
+  .card { border-radius: 44px; }
+
+  .cardMy { width: 1610px; background: #534AB7; padding: 50px 60px; display: flex; align-items: center; gap: 56px; }
+  /* desk calendar icon */
+  .calIcon { width: 380px; height: 430px; background: #FFFFFF; border-radius: 52px; overflow: hidden; flex: 0 0 auto;
+    display: flex; flex-direction: column; box-shadow: 0 24px 50px rgba(0,0,0,.28); }
+  .calIcon .strip { height: 112px; background: #7F77DD; display: flex; align-items: center; justify-content: center; gap: 64px; }
+  .calIcon .strip i { width: 30px; height: 30px; border-radius: 999px; background: #26215C; display: block; }
+  .calIcon .body { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 34px; }
+  .calIcon .num { font-size: 190px; font-weight: 800; color: #26215C; line-height: 1; }
+  .calIcon .evts { display: flex; gap: 24px; }
+  .calIcon .evts i { width: 38px; height: 38px; border-radius: 999px; display: block; }
+  .myMid { display: flex; flex-direction: column; gap: 20px; flex: 1; }
+  .myMid .t { font-size: 160px; font-weight: 800; color: #FFFFFF; line-height: 1.02; }
+  .myMid .s { font-size: 66px; font-weight: 700; color: #CFCBF8; }
+  .agendaBars { flex: 0 0 auto; width: 300px; display: flex; flex-direction: column; gap: 44px; align-items: flex-end; }
+  .agendaBars i { height: 62px; border-radius: 999px; display: block; }
+
+  .cardCheckin { width: 808px; background: #EEEDFE; padding: 40px; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 40px; }
+  .qr { width: 360px; height: 360px; position: relative; }
+  .qr .finder { position: absolute; width: 116px; height: 116px; border: 26px solid #26215C; border-radius: 22px; }
+  .qr .m { position: absolute; width: 40px; height: 40px; background: #26215C; border-radius: 8px; }
+  .cardCheckin .t { font-size: 100px; font-weight: 800; color: #26215C; }
+  .cardCheckin .s { font-size: 62px; font-weight: 700; color: #534AB7; }
+
+  /* ---- Row 2 (y 1062–1650): 3 equal ---- */
+  .row2 { position: absolute; left: 30px; top: 1060px; width: 2440px; height: 596px; display: flex; gap: 22px; }
+  .cell { flex: 1; background: #3C3489; border-radius: 44px; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 30px; padding: 28px; }
+  .cell .lab { text-align: center; display: flex; flex-direction: column; gap: 8px; }
+  .cell .lab .t { font-size: 82px; font-weight: 800; color: #FFFFFF; line-height: 1.05; }
+  .cell .lab .s { font-size: 48px; font-weight: 700; color: #B7B0F2; letter-spacing: 2px; }
+
+  /* agenda doc */
+  .doc { width: 268px; height: 296px; background: #E4E1FA; border-radius: 36px; padding: 46px 40px;
+    display: flex; flex-direction: column; gap: 34px; }
+  .doc i { height: 40px; border-radius: 999px; display: block; }
+
+  /* kanban */
+  .kanban { width: 320px; height: 286px; display: flex; gap: 28px; }
+  .kcol { flex: 1; display: flex; flex-direction: column; gap: 24px; }
+  .kcol i { height: 62px; border-radius: 18px; background: #E4E1FA; display: block; }
+
+  /* create calendar + plus */
+  .createWrap { position: relative; width: 286px; height: 296px; }
+  .cal2 { width: 286px; height: 296px; background: #E4E1FA; border-radius: 38px; overflow: hidden; display: flex; flex-direction: column; }
+  .cal2 .h { height: 82px; background: #7F77DD; }
+  .cal2 .b { flex: 1; display: flex; align-items: center; justify-content: center; gap: 32px; }
+  .cal2 .b i { width: 36px; height: 36px; border-radius: 999px; background: #7F77DD; display: block; }
+  .plus { position: absolute; right: -26px; bottom: -26px; width: 132px; height: 132px; border-radius: 999px;
+    background: #EF9F27; border: 13px solid #3C3489; color: #26215C; font-size: 90px; font-weight: 800;
+    display: flex; align-items: center; justify-content: center; line-height: 1; }
+</style>
+</head>
+<body>
+  <div class="canvas">
+    <div class="header">
+      <div class="brand"><span class="name">會議大師</span><span class="sub">AI 會議助理</span></div>
+      <div class="help"><span class="t">說明</span><span class="q">?</span></div>
+    </div>
+
+    <div class="row1">
+      <div class="card cardMy">
+        <div class="calIcon">
+          <div class="strip"><i></i><i></i></div>
+          <div class="body">
+            <div class="num">07</div>
+            <div class="evts"><i style="background:#AFA9EC"></i><i style="background:#EF9F27"></i><i style="background:#AFA9EC"></i></div>
+          </div>
+        </div>
+        <div class="myMid"><span class="t">我的會議</span><span class="s">3 場即將開始</span></div>
+        <div class="agendaBars">
+          <i style="width:100%;background:#8F87E6"></i>
+          <i style="width:70%;background:#EF9F27"></i>
+          <i style="width:85%;background:#8F87E6;opacity:.6"></i>
+        </div>
+      </div>
+      <div class="card cardCheckin">
+        <div class="qr">
+          <div class="finder" style="top:0;left:0"></div>
+          <div class="finder" style="top:0;right:0"></div>
+          <div class="finder" style="bottom:0;left:0"></div>
+          <div class="m" style="top:24px;right:168px"></div>
+          <div class="m" style="top:80px;right:150px"></div>
+          <div class="m" style="top:158px;left:34px"></div>
+          <div class="m" style="top:158px;left:94px"></div>
+          <div class="m" style="top:158px;left:214px;background:#EF9F27"></div>
+          <div class="m" style="top:214px;right:92px"></div>
+          <div class="m" style="bottom:144px;right:34px"></div>
+          <div class="m" style="bottom:92px;right:94px;background:#EF9F27"></div>
+          <div class="m" style="bottom:34px;right:158px"></div>
+          <div class="m" style="bottom:36px;right:34px"></div>
+        </div>
+        <div class="t">會議報到</div>
+        <div class="s">掃碼簽到</div>
+      </div>
+    </div>
+
+    <div class="row2">
+      <div class="cell">
+        <div class="doc">
+          <i style="width:75%;background:#534AB7"></i>
+          <i style="width:100%;background:#EF9F27"></i>
+          <i style="width:60%;background:#534AB7;opacity:.7"></i>
+        </div>
+        <div class="lab"><span class="t">查看議程</span><span class="s">Agenda</span></div>
+      </div>
+      <div class="cell">
+        <div class="kanban">
+          <div class="kcol"><i></i><i></i></div>
+          <div class="kcol"><i style="background:#EF9F27"></i><i></i><i></i></div>
+          <div class="kcol"><i></i></div>
+        </div>
+        <div class="lab"><span class="t">任務看板</span><span class="s">Tasks</span></div>
+      </div>
+      <div class="cell">
+        <div class="createWrap">
+          <div class="cal2"><div class="h"></div><div class="b"><i></i><i></i><i></i></div></div>
+          <div class="plus">+</div>
+        </div>
+        <div class="lab"><span class="t">建立會議</span><span class="s">Create</span></div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

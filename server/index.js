@@ -11,6 +11,8 @@ import {
   buildCheckinMessage,
   buildCancelMessage,
   buildDeleteMessage,
+  buildUpdateMessage,
+  buildBatchNoticeMessage,
   buildKeywordGuideMessage,
   getBotInfo,
   getQuota,
@@ -43,6 +45,11 @@ const MEETING_KEYWORDS = ["請假", "leave", "rsvp", "我的會議", "改期", "
 const ADMIN_KEYWORDS = ["admin", "管理", "後台", "管理者", "主持人後台"];
 // …and these re-send the keyword cheat-sheet (also pushed right after register).
 const HELP_KEYWORDS = ["關鍵字", "說明", "help", "keyword", "指令", "功能", "使用說明"];
+// Rich-menu buttons (message actions — reply for free; no push quota):
+const CHECKIN_KEYWORDS = ["報到", "checkin", "check-in", "簽到"]; // → My Meetings (check-in shows during the meeting)
+const AGENDA_KEYWORDS = ["議程", "agenda"];                       // → My Meetings (agenda per meeting)
+const TASK_KEYWORDS = ["任務", "tasks", "任務看板"];              // → coming soon (no tasks feature yet)
+const CREATE_KEYWORDS = ["建立會議", "create", "建立"];           // → admin console link
 
 db.loadStore(); // restore persisted data (members, schedules, meetings…)
 db.seed();      // seeds the empty meeting only if nothing was loaded
@@ -147,6 +154,14 @@ app.post("/api/meetings", (req, res) => {
 app.get("/api/meetings/deleted", (req, res) => res.json(db.listDeleted().filter((m) => canSee(m, currentUser(req)))));
 // Cancelled: meetings the host cancelled from the dashboard.
 app.get("/api/meetings/cancelled", (req, res) => res.json(db.listCancelled().filter((m) => canSee(m, currentUser(req)))));
+
+// Scheduling-conflict check: given proposed date(s) + time + attendee names,
+// return which attendees are already booked in an overlapping meeting. Used by
+// the create/edit form to warn the creator (soft, non-blocking).
+app.post("/api/meetings/check-conflicts", (req, res) => {
+  const { dates, startTime, endTime, names, excludeMeetingId } = req.body || {};
+  res.json(db.findConflicts({ dates, startTime, endTime, names, excludeMeetingId }));
+});
 
 app.post("/api/meetings/:id/trash", (req, res) => {
   const existing = db.getMeeting(req.params.id);
@@ -310,6 +325,23 @@ app.post("/api/meetings/:id/remind-unread", async (req, res) => {
     }
   }
   res.json({ ok: true, unread: unread.map((r) => ({ name: r.name, dept: r.dept })), pushed });
+});
+
+// Notify attendees that a meeting's details were updated (creator-only).
+app.post("/api/meetings/:id/notify-update", async (req, res) => {
+  const m = db.getMeeting(req.params.id);
+  if (!m) return res.status(404).json({ error: "meeting not found" });
+  if (!canEdit(m, currentUser(req))) return res.status(403).json({ error: "only the creator can update this meeting", code: "not_owner" });
+  let pushed = 0, recipients = 0;
+  if (LINE_CONFIGURED) {
+    const msg = [buildUpdateMessage(m)];
+    for (const p of m.roster) {
+      if (!/^U[0-9a-f]{32}$/.test(p.lineUserId || "")) continue;
+      recipients++;
+      try { await pushTo(p.lineUserId, msg); pushed++; } catch { /* keep going */ }
+    }
+  }
+  res.json({ ok: true, pushed, recipients });
 });
 
 // Cancel a meeting: notify every attendee (with a real LINE userId) that it is
@@ -640,6 +672,25 @@ app.post("/api/line/webhook", async (req, res) => {
           try { await replyMessage(ev.replyToken, [buildKeywordGuideMessage()]); }
           catch (e) { console.error("[webhook] reply failed", e.message); }
         }
+      } else if (CHECKIN_KEYWORDS.includes(text) || AGENDA_KEYWORDS.includes(text)) {
+        // Rich-menu 報到 / 議程 → open My Meetings (check-in + agenda live there).
+        if (LINE_CONFIGURED && ev.replyToken) {
+          try { await replyMessage(ev.replyToken, [buildMyMeetingsMessage(BASE_URL, userId)]); }
+          catch (e) { console.error("[webhook] reply failed", e.message); }
+        }
+      } else if (TASK_KEYWORDS.includes(text)) {
+        // Rich-menu 任務 → tasks board not built yet.
+        if (LINE_CONFIGURED && ev.replyToken) {
+          try { await replyMessage(ev.replyToken, [{ type: "text", text: "🗂 任務看板功能開發中，敬請期待。\nTasks board is coming soon." }]); }
+          catch (e) { console.error("[webhook] reply failed", e.message); }
+        }
+      } else if (CREATE_KEYWORDS.includes(text)) {
+        // Rich-menu 建立會議 → creating meetings is done in the admin console.
+        if (LINE_CONFIGURED && ev.replyToken) {
+          const adminUrl = `${BASE_URL}/?view=host`;
+          try { await replyMessage(ev.replyToken, [{ type: "text", text: `🛠 建立會議請至管理者後台：\n${adminUrl}\n開啟後選擇您的姓名登入。` }]); }
+          catch (e) { console.error("[webhook] reply failed", e.message); }
+        }
       }
     }
   }
@@ -703,13 +754,16 @@ async function fireSchedule(s, { live = true } = {}) {
   const occ = db.nextOccurrence(s, Date.now());
   if (!occ) return { error: "no upcoming occurrence" };
   const occKey = db.ymd(occ);
+  const meetingId = `${s.id}__${occKey}`;
+  // If this occurrence was cancelled / deleted / purged, never (re)materialise or
+  // notify — it's off. (createMeeting would otherwise resurrect a trashed copy.)
+  if (db.isTrashed(meetingId)) return { mode: "cancelled", meetingId, count: 0 };
   const recipients = s.recipientIds?.length
     ? s.roster.filter((p) => s.recipientIds.includes(p.id))
     : s.roster;
 
   // Materialise the occurrence's meeting once; reuse it on later sends (so a
   // second lead-time broadcast doesn't reset participants' responses).
-  const meetingId = `${s.id}__${occKey}`;
   const meeting = db.getMeeting(meetingId) || db.createMeeting({
     id: meetingId,
     title: s.title,
@@ -819,21 +873,52 @@ app.post("/api/schedules", async (req, res) => {
   if (creatorId && !recipientIds.includes(creatorId)) recipientIds.push(creatorId);
   const s = db.createSchedule({ ...req.body, creatorId, recipientIds });
 
-  // Notify the selected recipients immediately on creation (next occurrence).
-  // Mark that occurrence's lead windows as already fired so the background
-  // scheduler doesn't send the same notice a second time.
+  // `silent` (used for batch/multi-day creation): don't send a per-meeting notice
+  // now, and mark this occurrence's lead windows fired so the scheduler doesn't
+  // remind per day either — one consolidated batch notice is sent separately.
   let notify = null;
-  try {
-    notify = await fireSchedule(s, { live: true });
-    if (notify?.meetingId) {
-      const occKey = notify.meetingId.slice(notify.meetingId.indexOf("__") + 2);
-      for (const lead of s.leads) s.fired[`${occKey}@${lead}`] = true;
+  if (req.body?.silent === true) {
+    const occ = db.nextOccurrence(s, Date.now());
+    if (occ) { const occKey = db.ymd(occ); for (const lead of s.leads) s.fired[`${occKey}@${lead}`] = true; }
+    notify = { mode: "silent", count: 0 };
+  } else {
+    // Notify the selected recipients immediately on creation (next occurrence),
+    // and mark that occurrence's lead windows fired to avoid a duplicate.
+    try {
+      notify = await fireSchedule(s, { live: true });
+      if (notify?.meetingId) {
+        const occKey = notify.meetingId.slice(notify.meetingId.indexOf("__") + 2);
+        for (const lead of s.leads) s.fired[`${occKey}@${lead}`] = true;
+      }
+    } catch (e) {
+      notify = { mode: "error", error: e.message };
     }
-  } catch (e) {
-    notify = { mode: "error", error: e.message };
   }
 
   res.status(201).json({ ...db.decorateSchedule(s, Date.now()), notify });
+});
+
+// Send ONE consolidated notice for a batch of just-created schedules (so the
+// recipients get a single message for the whole batch, not one per day).
+app.post("/api/schedules/notify-batch", async (req, res) => {
+  const ids = Array.isArray(req.body?.scheduleIds) ? req.body.scheduleIds : [];
+  const uid = currentUser(req);
+  const scheds = ids.map((id) => db.getSchedule(id)).filter(Boolean);
+  if (!scheds.length) return res.json({ ok: true, pushed: 0, meetings: 0 });
+  if (scheds.some((s) => !canEdit(s, uid))) return res.status(403).json({ error: "only the creator can notify", code: "not_owner" });
+  const recipients = new Set();
+  for (const s of scheds) {
+    const recs = s.recipientIds?.length ? s.roster.filter((p) => s.recipientIds.includes(p.id)) : s.roster;
+    for (const p of recs) if (/^U[0-9a-f]{32}$/.test(p.lineUserId || "")) recipients.add(p.lineUserId);
+  }
+  const first = scheds[0];
+  const dates = scheds.map((s) => s.recurrence?.date).filter(Boolean).sort();
+  let pushed = 0;
+  if (LINE_CONFIGURED && recipients.size && dates.length) {
+    const msg = [buildBatchNoticeMessage({ title: first.title, location: first.location, startTime: first.startTime, endTime: first.endTime, dates })];
+    for (const rid of recipients) { try { await pushTo(rid, msg); pushed++; } catch { /* keep going */ } }
+  }
+  res.json({ ok: true, pushed, meetings: scheds.length });
 });
 
 app.patch("/api/schedules/:id", (req, res) => {
@@ -867,6 +952,14 @@ const CHECKIN_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours
 // whose send window has arrived — so multiple selected lead times each send.
 async function tick() {
   const now = Date.now();
+
+  // Auto-purge: permanently drop removed meetings untouched for > 10 days.
+  const purged = db.purgeExpiredRemoved(now);
+  if (purged.length) {
+    console.log(`[scheduler] auto-purged ${purged.length} removed meeting(s) older than 10 days: ${purged.join(", ")}`);
+    db.persist();
+  }
+
   for (const real of db.listSchedules().map((s) => db.getSchedule(s.id)).filter(Boolean)) {
     if (!real.enabled) continue;
 
@@ -875,7 +968,7 @@ async function tick() {
     // Non-responders aren't pushed — they find check-in in 我的會議 / My Meetings.
     const recent = db.occurrencesInRange(real, now - CHECKIN_WINDOW_MS, now);
     const started = recent.length ? recent[recent.length - 1] : null;
-    if (started) {
+    if (started && !db.isTrashed(`${real.id}__${db.ymd(started)}`)) {
       const ck = `${db.ymd(started)}@checkin`;
       if (!real.fired[ck]) {
         real.fired[ck] = true;
@@ -891,6 +984,11 @@ async function tick() {
     const occ = db.nextOccurrence(real, now);
     if (!occ) continue;
     const occKey = db.ymd(occ);
+    // Cancelled / deleted / purged occurrence → never remind; mark fired so it stops.
+    if (db.isTrashed(`${real.id}__${occKey}`)) {
+      for (const lead of real.leads) real.fired[`${occKey}@${lead}`] = true;
+      continue;
+    }
     for (const lead of real.leads) {
       const sendAt = occ.getTime() - lead * 60000;
       const key = `${occKey}@${lead}`;

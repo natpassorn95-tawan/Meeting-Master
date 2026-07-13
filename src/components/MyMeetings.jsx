@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { api } from "../api.js";
-import { ACCENT, GREEN, RED, card, label, input, btn, pill, LEAVE_TYPES } from "../ui.js";
+import { ACCENT, GREEN, RED, AMBER, card, label, input, btn, pill, LEAVE_TYPES } from "../ui.js";
 import { useT, fmtDateTimeI18n } from "../i18n.jsx";
 import { liffConfigured, getLiffProfile } from "../liff.js";
 import { attIcon } from "./Schedules.jsx";
@@ -189,6 +189,22 @@ function Row({ it, t, lang, busy, onSet, onCheckout, userId }) {
   // Check-out stays open until end + 1 hour; requires having checked in.
   const canCheckout = checkedIn && !checkedOut && Number.isFinite(startMs) && now >= startMs && Number.isFinite(endMs) && now <= endMs + 60 * 60 * 1000;
 
+  // Relative "starts in" badge + status color, for the time rail. Lets the eye
+  // read timing at a glance instead of parsing each card's date line.
+  const NEUTRAL = "#8A8A93";
+  let rel = "", relTone = NEUTRAL;
+  if (!removed) {
+    if (ongoing) { rel = t("mymeetings.relNow"); relTone = GREEN; }
+    else if (ended) { rel = t("mymeetings.relEnded"); relTone = NEUTRAL; }
+    else if (Number.isFinite(startMs)) {
+      const delta = startMs - now;
+      if (delta < 3600000) { rel = t("mymeetings.relMin", { n: Math.max(1, Math.round(delta / 60000)) }); relTone = AMBER; }
+      else if (delta < 86400000) { rel = t("mymeetings.relHour", { n: Math.round(delta / 3600000) }); relTone = NEUTRAL; }
+      else { rel = t("mymeetings.relDay", { n: Math.round(delta / 86400000) }); relTone = NEUTRAL; }
+    }
+  }
+  const barColor = removed ? "rgba(0,0,0,.14)" : relTone;
+
   // Open the check-in page (materialise the occurrence first if needed).
   async function goCheckin() {
     setGoing(true);
@@ -206,20 +222,28 @@ function Row({ it, t, lang, busy, onSet, onCheckout, userId }) {
     <button onClick={onClick} disabled={busy || active} style={{ flex: 1, height: 38, fontSize: 13, fontWeight: 500, borderRadius: 8, cursor: (busy || active) ? "default" : "pointer", border: active ? "none" : "0.5px solid rgba(0,0,0,.2)", background: active ? color : "transparent", color: active ? "#fff" : "var(--color-text-primary)", opacity: busy ? 0.6 : 1 }}>{text}</button>
   );
   return (
-    <div style={{ ...card, ...((ended || removed) ? { opacity: 0.7 } : {}) }}>
+    <div style={{ ...card, padding: "14px 16px", display: "flex", gap: 12, alignItems: "stretch", ...((ended || removed) ? { opacity: 0.7 } : {}) }}>
+      {/* Time rail — bold start time the eye scans down the left edge */}
+      <div style={{ width: 52, flexShrink: 0, textAlign: "right", display: "flex", flexDirection: "column", gap: 1, paddingTop: 1 }}>
+        <span style={{ fontSize: 19, fontWeight: 700, lineHeight: 1.05, fontVariantNumeric: "tabular-nums", color: removed ? "var(--color-text-tertiary,#999)" : "var(--color-text-primary)" }}>{it.startTime || "—"}</span>
+        {it.endTime ? <span style={{ fontSize: 12, fontVariantNumeric: "tabular-nums", color: "var(--color-text-tertiary,#999)" }}>{it.endTime}</span> : null}
+      </div>
+      {/* Status bar — color encodes timing (green now · amber soon · grey later) */}
+      <div style={{ width: 4, borderRadius: 999, background: barColor, flexShrink: 0 }} />
+      {/* Content */}
+      <div style={{ flex: 1, minWidth: 0 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
         <p style={{ margin: 0, fontSize: 16, fontWeight: 500, ...(removed ? { textDecoration: "line-through", color: "var(--color-text-secondary)" } : {}) }}>{it.title || "（未命名會議）"}</p>
+        {!removed && rel ? <span style={{ ...pill(relTone + "1F", relTone), fontWeight: 700 }}>{rel}</span> : null}
         {cancelled ? <span style={pill("#F7E4EC", RED)}>{t("mymeetings.cancelledTag")}</span> : null}
         {deleted ? <span style={pill("rgba(0,0,0,.06)", "#888")}>{t("mymeetings.deletedTag")}</span> : null}
-        {!removed && ended ? <span style={pill("rgba(0,0,0,.06)", "#888")}>{t("mymeetings.passedTag")}</span> : null}
-        {!removed && ongoing ? <span style={pill(ACCENT + "1F", ACCENT)}>{t("mymeetings.ongoingTag")}</span> : null}
         {!removed && checkedOut ? <span style={pill("#EDEBF7", ACCENT)}>👋 {t("mymeetings.checkedOut")}</span> : null}
         {!removed && !checkedOut && checkedIn ? <span style={pill("#E1F5EE", GREEN)}>✓ {t("mymeetings.checkedIn")}</span> : null}
         {!removed && !checkedIn && isYes ? <span style={pill("#E1F5EE", GREEN)}>{t("mymeetings.confirmed")}</span> : null}
         {!removed && isLeave ? <span style={pill("#F7E4EC", RED)}>{t("mymeetings.onLeave")}</span> : null}
       </div>
       <p style={{ margin: "2px 0 12px", fontSize: 13, color: "var(--color-text-secondary)" }}>
-        {fmtDateTimeI18n(it.date, it.startTime, it.endTime, lang)}
+        {fmtDateTimeI18n(it.date, "", "", lang)}
         {!removed && it.recurring ? <span style={{ marginLeft: 6, fontSize: 12, color: "var(--color-text-tertiary,#999)" }}>🔁 {t("mymeetings.nextOccurrence")}</span> : null}
       </p>
       {!removed && (it.topics?.length || it.attachments?.length) ? (
@@ -282,6 +306,7 @@ function Row({ it, t, lang, busy, onSet, onCheckout, userId }) {
           ) : null}
         </>
       )}
+      </div>
     </div>
   );
 }

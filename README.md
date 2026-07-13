@@ -131,6 +131,57 @@ server/store.js                # in-memory store + seeded mock meeting
 vite.config.js                 # dev :5273, /api proxy → :8899
 ```
 
+## LINE Rich Menu (選單)
+
+A tappable menu on the LINE OA so users self-serve via **free** message replies / LIFF
+instead of push quota (rich-menu + reply APIs cost **zero** of the 200/mo push budget).
+
+Files live in [`richmenu/`](richmenu/):
+- `render.html` — the "dark violet bento" design (HTML/CSS).
+- `richmenu_main.png` — the rendered image, **2500×1686**, < 1 MB.
+- `deploy_richmenu.py` — create / upload / set-default / list / rollback (stdlib only).
+
+### Regenerate the image
+```bash
+cd richmenu
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --headless=new --disable-gpu --hide-scrollbars --force-device-scale-factor=1 \
+  --window-size=2500,1686 --screenshot=richmenu_main.png "file://$PWD/render.html"
+```
+Edit `render.html` to change the design; the size must stay exactly 2500×1686.
+
+### Deploy / redeploy
+```bash
+cd richmenu
+python3 deploy_richmenu.py          # create menu + upload image + set as default
+python3 deploy_richmenu.py --force  # deploy again even if a v1 menu already exists
+```
+Reads `LINE_CHANNEL_ACCESS_TOKEN` from the env or `../.env`. It **warns** (and stops)
+if a menu named `meeting-master-main-v1` already exists — use `--force` to add anyway,
+or roll back the old one first. Nothing here sends a push message.
+
+### List / rollback
+```bash
+python3 deploy_richmenu.py --list                 # list all rich menus + ids
+python3 deploy_richmenu.py --rollback <richMenuId> # delete that menu
+python3 deploy_richmenu.py --rollback              # delete ALL meeting-master-main-v1 menus + clear default
+```
+
+### Swap message actions → LIFF
+Today the check-in / agenda / tasks / create buttons use **message actions**
+(報到 / 議程 / 任務 / 建立會議) — the webhook replies to each for free. When the LIFF
+pages exist, set `LIFF_ID=<your-liff-id>` in `.env` and redeploy — `deploy_richmenu.py`
+then routes those four areas to `https://liff.line.me/<LIFF_ID>/{checkin,agenda,tasks,create}`
+automatically (see `liff_or_msg()` + the TODO markers). "我的會議" and "說明/help" stay
+message actions. The image doesn't change.
+
+Touch areas are matched to the rendered layout: header `y0–248` (help pill top-right),
+row 1 `y248–1050` split 2:1 at `x1648` (我的會議 | 報到), row 2 `y1050–1686` split in
+three at `x841` / `x1659` (議程 | 任務 | 建立會議).
+
+> Note: the backend is **Node/Express** (not FastAPI); `deploy_richmenu.py` is a
+> standalone ops script that talks to the LINE API directly, so it needs no backend deps.
+
 ## Next (from the mockup, not built yet)
 
 - During: QR check-in, meeting timer, voice upload → AI minutes, Indonesian mode
