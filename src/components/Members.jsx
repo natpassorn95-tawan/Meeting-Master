@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { api } from "../api.js";
-import { ACCENT, GREEN, AMBER, card, btn, pill, avatar, jobTitleLabel, departmentLabel } from "../ui.js";
+import { ACCENT, GREEN, RED, AMBER, card, btn, softBtn, pill, avatar, jobTitleLabel, departmentLabel } from "../ui.js";
 import { useT } from "../i18n.jsx";
 
 export default function Members({ go }) {
@@ -80,24 +80,24 @@ export default function Members({ go }) {
       </div>
 
       <div style={card}>
-        <button onClick={simulate} disabled={busy} style={{ ...btn(true) }}>{t("members.simulate")}</button>
-        <span style={{ marginLeft: 10, fontSize: 12, color: "var(--color-text-tertiary,#999)" }}>{t("members.simulateHint")}</span>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: (members && members.length) || link || error ? 12 : 0, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 14, fontWeight: 500, color: "var(--color-text-secondary)" }}>
+            {members && members.length > 0 ? t("members.count", { n: members.length }) : ""}
+          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            {members && members.length > 0 ? (
+              <button onClick={exportCsv} style={{ ...btn(false), height: 34, fontSize: 13 }}>⤓ {t("members.export")}</button>
+            ) : null}
+            <button onClick={simulate} disabled={busy} style={{ ...btn(true), height: 34, fontSize: 13, opacity: busy ? 0.5 : 1 }}>{t("members.simulate")}</button>
+          </div>
+        </div>
         {link ? (
-          <div style={{ marginTop: 12, padding: "0.7rem 1rem", background: "#FFF6E5", color: AMBER, borderRadius: 8, fontSize: 14 }}>
+          <div style={{ marginBottom: 12, padding: "0.7rem 1rem", background: "#FFF6E5", color: AMBER, borderRadius: 8, fontSize: 14 }}>
             {t("members.statusPending")}: <code style={{ fontSize: 12 }}>{link.member.lineUserId}</code>
             <button onClick={() => go("register", { u: link.member.lineUserId })} style={{ ...btn(false), height: 30, fontSize: 12, marginLeft: 10 }}>{t("members.openForm")}</button>
           </div>
         ) : null}
-        {error ? <div style={{ marginTop: 12, color: "#993556", fontSize: 14 }}>⚠ {error}</div> : null}
-      </div>
-
-      <div style={card}>
-        {members && members.length > 0 ? (
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 14, fontWeight: 500, color: "var(--color-text-secondary)" }}>{t("members.count", { n: members.length })}</span>
-            <button onClick={exportCsv} style={{ ...btn(false), height: 32, fontSize: 13 }}>⤓ {t("members.export")}</button>
-          </div>
-        ) : null}
+        {error ? <div style={{ marginBottom: 12, color: "#993556", fontSize: 14 }}>⚠ {error}</div> : null}
         {members === null ? <p style={{ color: "var(--color-text-secondary)" }}>{t("common.loading")}</p> : members.length === 0 ? (
           <p style={{ color: "var(--color-text-tertiary,#999)", margin: 0 }}>{t("members.none")}</p>
         ) : (
@@ -124,15 +124,13 @@ export default function Members({ go }) {
                     ? <span style={pill("#E1F5EE", GREEN)}>{t("members.statusRegistered")}</span>
                     : <span style={pill("#FFF6E5", AMBER)}>{t("members.statusPending")}</span>}
                   {reg ? (
-                    <select
-                      value={inactive ? "inactive" : "active"}
-                      onChange={(e) => setActive(m.lineUserId, e.target.value === "active")}
+                    <button
+                      onClick={() => setActive(m.lineUserId, inactive)}
                       title={t("members.employmentStatus")}
-                      style={{ height: 30, fontSize: 12, padding: "0 8px", borderRadius: 8, appearance: "auto", cursor: "pointer", border: "0.5px solid rgba(0,0,0,.25)", background: "#fff", color: inactive ? "#993556" : "var(--color-text-primary)" }}
+                      style={{ ...softBtn(inactive ? RED : GREEN), height: 30 }}
                     >
-                      <option value="active">🟢 {t("members.active")}</option>
-                      <option value="inactive">⚫ {t("members.inactive")}</option>
-                    </select>
+                      {inactive ? `⚫ ${t("members.inactive")}` : `🟢 ${t("members.active")}`}
+                    </button>
                   ) : (
                     <button onClick={() => go("register", { u: m.lineUserId })} style={{ ...btn(false), height: 28, fontSize: 11, padding: "0 10px" }}>{t("members.openForm")}</button>
                   )}
