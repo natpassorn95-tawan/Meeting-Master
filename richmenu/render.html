@@ -45,12 +45,19 @@
   .agendaBars i { height: 62px; border-radius: 999px; display: block; }
 
   .cardCheckin { width: 808px; background: #EEEDFE; padding: 40px; display: flex; flex-direction: column;
-    align-items: center; justify-content: center; gap: 40px; }
-  .qr { width: 360px; height: 360px; position: relative; }
-  .qr .finder { position: absolute; width: 116px; height: 116px; border: 26px solid #26215C; border-radius: 22px; }
-  .qr .m { position: absolute; width: 40px; height: 40px; background: #26215C; border-radius: 8px; }
-  .cardCheckin .t { font-size: 100px; font-weight: 800; color: #26215C; }
-  .cardCheckin .s { font-size: 62px; font-weight: 700; color: #534AB7; }
+    align-items: center; justify-content: center; gap: 36px; }
+  /* check-in / check-out: two antiparallel arrows (in ▸ violet, out ◂ orange) */
+  .io { width: 380px; height: 360px; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 60px; }
+  .arw { display: flex; align-items: center; }
+  .arw .shaft { height: 60px; border-radius: 999px; display: block; }
+  .arw .head { width: 0; height: 0; border-top: 62px solid transparent; border-bottom: 62px solid transparent; display: block; }
+  .arwIn  .shaft { width: 176px; background: #534AB7; }
+  .arwIn  .head  { border-left: 96px solid #534AB7; margin-left: -8px; }
+  .arwOut .head  { border-right: 96px solid #EF9F27; margin-right: -8px; }
+  .arwOut .shaft { width: 176px; background: #EF9F27; }
+  .cardCheckin .t { font-size: 100px; font-weight: 800; color: #26215C; letter-spacing: 4px; }
+  .cardCheckin .s { font-size: 56px; font-weight: 700; color: #534AB7; }
 
   /* ---- Row 2 (y 1062–1650): 3 equal ---- */
   .row2 { position: absolute; left: 30px; top: 1060px; width: 2440px; height: 596px; display: flex; gap: 22px; }
@@ -105,23 +112,12 @@
         </div>
       </div>
       <div class="card cardCheckin">
-        <div class="qr">
-          <div class="finder" style="top:0;left:0"></div>
-          <div class="finder" style="top:0;right:0"></div>
-          <div class="finder" style="bottom:0;left:0"></div>
-          <div class="m" style="top:24px;right:168px"></div>
-          <div class="m" style="top:80px;right:150px"></div>
-          <div class="m" style="top:158px;left:34px"></div>
-          <div class="m" style="top:158px;left:94px"></div>
-          <div class="m" style="top:158px;left:214px;background:#EF9F27"></div>
-          <div class="m" style="top:214px;right:92px"></div>
-          <div class="m" style="bottom:144px;right:34px"></div>
-          <div class="m" style="bottom:92px;right:94px;background:#EF9F27"></div>
-          <div class="m" style="bottom:34px;right:158px"></div>
-          <div class="m" style="bottom:36px;right:34px"></div>
+        <div class="io">
+          <div class="arw arwIn"><span class="shaft"></span><span class="head"></span></div>
+          <div class="arw arwOut"><span class="head"></span><span class="shaft"></span></div>
         </div>
-        <div class="t">會議報到</div>
-        <div class="s">掃碼簽到</div>
+        <div class="t">簽到簽退</div>
+        <div class="s">Check In / Out</div>
       </div>
     </div>
 
