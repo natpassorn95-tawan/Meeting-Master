@@ -38,7 +38,9 @@ while true; do
 
   URL=""
   for _ in $(seq 1 30); do
-    URL=$(grep -Eo "https://[a-z0-9-]+\.trycloudflare\.com" /tmp/mm_tunnel.log | head -1)
+    # Exclude api.trycloudflare.com — that host only appears in the provisioning
+    # POST (and its error line); the real quick-tunnel is a random subdomain.
+    URL=$(grep -Eo "https://[a-z0-9-]+\.trycloudflare\.com" /tmp/mm_tunnel.log | grep -v '://api\.' | head -1)
     if [ -n "$URL" ] && grep -q "Registered tunnel connection" /tmp/mm_tunnel.log; then break; fi
     sleep 1
   done
