@@ -23,6 +23,8 @@ import {
   verifySignature,
 } from "./line.js";
 import * as db from "./store.js";
+import { linkMemberIdentity, startIdentitySync } from "./identity-link.js";
+import { handleAiaiTasksPostback } from "./aiai-tasks.js";
 
 // Load .env (LINE_CHANNEL_ACCESS_TOKEN etc.) — Node 22 built-in, no dependency.
 try {
@@ -642,6 +644,11 @@ app.post("/api/line/webhook", async (req, res) => {
       }
     } else if (ev.type === "postback") {
       console.log(`[webhook] postback ${userId}: ${ev.postback?.data}`);
+      // Rich-menu "我的任務" → Aiai Board tasks (LINE userId → email → tasks).
+      const params = new URLSearchParams(ev.postback?.data || "");
+      if (params.get("action") === "aiai_tasks") {
+        await handleAiaiTasksPostback({ userId, replyToken: ev.replyToken, baseUrl: BASE_URL });
+      }
     } else if (ev.type === "message" && ev.message?.type === "text" && userId) {
       const text = ev.message.text.trim().toLowerCase();
       console.log(`[webhook] message ${userId}: ${text}`);
@@ -714,6 +721,10 @@ app.post("/api/members/:userId/register", (req, res) => {
   if (!String(department || "").trim()) return res.status(400).json({ error: "department is required" });
   const m = db.registerMember(req.params.userId, { name, employeeId, email, jobTitle, department });
   res.json(m);
+  // Mirror this person into the OPAL central identity service (LINE ↔ email),
+  // so other apps can resolve them. Fire-and-forget: never blocks or fails
+  // registration if the identity service is down (it queues + retries).
+  linkMemberIdentity(m);
   // After registering, push the keyword cheat-sheet so the member knows how to
   // start (fire-and-forget; only to a real, bound LINE userId).
   const uid = req.params.userId;
@@ -1020,4 +1031,5 @@ app.listen(PORT, () => {
   console.log(`[meeting-master] base URL for participant links: ${BASE_URL}`);
   console.log(`[meeting-master] LINE: ${LINE_CONFIGURED ? "configured ✓" : "NOT configured"}`);
   console.log(`[meeting-master] scheduler: tick 60s, autosend ${AUTOSEND ? "ON" : "OFF"}`);
+  startIdentitySync(); // background retry sweep for the central identity service
 });

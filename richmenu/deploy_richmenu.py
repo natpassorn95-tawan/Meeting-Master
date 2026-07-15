@@ -11,9 +11,11 @@ Usage:
                                         # delete that menu (or all v1 menus if omitted)
 
 Token: read from env LINE_CHANNEL_ACCESS_TOKEN, else from ../.env.
-LIFF:  if LIFF_ID env/.env is set, the checkin/agenda/tasks/create areas use
+LIFF:  if LIFF_ID env/.env is set, the checkin/agenda/create areas use
        https://liff.line.me/<LIFF_ID>/<page>; otherwise they fall back to message
        actions (the webhook replies for free). See TODO markers below.
+Tasks: the「任務」area is a POSTBACK (action=aiai_tasks) → Aiai Board tasks,
+       independent of LIFF (handled by the webhook, not a LIFF page).
 """
 import json, os, sys, urllib.request, urllib.error
 
@@ -62,7 +64,8 @@ def req(method, url, *, data=None, ctype="application/json", parse=True):
 def liff_or_msg(page, keyword):
     """LIFF URI if configured, else a free message action (webhook replies).
     TODO: once LIFF pages exist, set LIFF_ID and each area routes to
-      https://liff.line.me/<LIFF_ID>/{checkin,agenda,tasks,create}."""
+      https://liff.line.me/<LIFF_ID>/{checkin,agenda,create}.
+    (Tasks is NOT here — it's a postback handled by the webhook, see build_menu.)"""
     if LIFF_ID:
         return {"type": "uri", "uri": f"https://liff.line.me/{LIFF_ID}/{page}"}
     return {"type": "message", "text": keyword}
@@ -85,7 +88,10 @@ def build_menu():
             {"bounds": {"x": 0,    "y": 1050, "width": 841,  "height": 636},
              "action": liff_or_msg("agenda", "議程")},                                 # Agenda
             {"bounds": {"x": 841,  "y": 1050, "width": 818,  "height": 636},
-             "action": liff_or_msg("tasks", "任務")},                                  # Tasks
+             # Tasks belongs to Aiai Board: a POSTBACK (not LIFF/message) so the
+             # webhook resolves LINE userId → email → the user's Aiai Board tasks
+             # and replies with a Flex list. See server/aiai-tasks.js.
+             "action": {"type": "postback", "data": "action=aiai_tasks", "displayText": "我的任務"}},   # Tasks → Aiai Board
             {"bounds": {"x": 1659, "y": 1050, "width": 841,  "height": 636},
              "action": liff_or_msg("create", "建立會議")},                             # Create
             {"bounds": {"x": 2020, "y": 0,    "width": 480,  "height": 248},
