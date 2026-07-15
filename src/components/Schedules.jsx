@@ -78,7 +78,7 @@ export function ScheduleList({ go, reloadToken, onMutated }) {
                     : <span style={pill("rgba(0,0,0,.06)", "#888")}>{t("sched.disabled")}</span>}
                 </div>
                 <p style={{ margin: "6px 0 0", fontSize: 13, color: "var(--color-text-secondary)" }}>
-                  🔁 {recurrenceTextI18n(s, lang)}　📍 {s.location || "—"}　👤 {s.host || "—"}
+                  🔁 {recurrenceTextI18n(s, lang)}　📍 {s.location || "—"}{s.onlineUrl ? "　🔗 線上 Online" : ""}　👤 {s.host || "—"}
                 </p>
                 {(s.startDate || s.endDate) ? (
                   <p style={{ margin: "4px 0 0", fontSize: 13, color: "var(--color-text-secondary)" }}>📆 {s.startDate || "…"} – {s.endDate || "…"}</p>
@@ -140,13 +140,13 @@ export function CreateForm({ dates = [], editMeeting = null, editId = null, onCr
   const multi = !editing && dates.length > 1;
   const [pool, setPool] = useState([]);
   const [f, setF] = useState(editing ? {
-    title: editMeeting.title || "", location: editMeeting.location || "", host: editMeeting.host || "",
+    title: editMeeting.title || "", location: editMeeting.location || "", onlineUrl: editMeeting.onlineUrl || "", host: editMeeting.host || "",
     startTime: editMeeting.startTime || "14:00", endTime: editMeeting.endTime || "15:30",
     freq: "once", weekday: 5, nth: 1, date: editMeeting.date || "", startDate: "", endDate: "", leads: [15],
     topics: (editMeeting.topics || []).map((tp) => tp.title).join("\n"),
     visibility: editMeeting.visibility || "public",
   } : {
-    title: "", location: "", host: "", startTime: "14:00", endTime: "15:30",
+    title: "", location: "", onlineUrl: "", host: "", startTime: "14:00", endTime: "15:30",
     freq: "weekly", weekday: 5, nth: 1, date: "", startDate: "", endDate: "", leads: [15], topics: "",
     visibility: "public",
   });
@@ -231,7 +231,7 @@ export function CreateForm({ dates = [], editMeeting = null, editId = null, onCr
     if (editing) {
       setSaving(true); setError("");
       try {
-        await api.updateMeta(editId, { title: f.title.trim(), location: f.location.trim(), host: f.host.trim(), date: f.date, startTime: f.startTime, endTime: f.endTime, visibility: f.visibility, attachments });
+        await api.updateMeta(editId, { title: f.title.trim(), location: f.location.trim(), onlineUrl: f.onlineUrl.trim(), host: f.host.trim(), date: f.date, startTime: f.startTime, endTime: f.endTime, visibility: f.visibility, attachments });
         await api.setTopics(editId, f.topics.split("\n").map((x) => x.trim()).filter(Boolean).map((title) => ({ title })));
         await api.setRoster(editId, pool.filter((p) => recipients.includes(p.id)).map((p) => ({ name: p.name, dept: p.dept, lineUserId: p.lineUserId })));
         const r = await api.notifyUpdate(editId).catch(() => ({ pushed: 0 }));
@@ -244,7 +244,7 @@ export function CreateForm({ dates = [], editMeeting = null, editId = null, onCr
     if (!multi && f.freq === "once" && !f.date) { setError(t("sched.errDate")); return; }
     setSaving(true); setError("");
     const base = {
-      title: f.title.trim(), location: f.location.trim(), host: f.host.trim(),
+      title: f.title.trim(), location: f.location.trim(), onlineUrl: f.onlineUrl.trim(), host: f.host.trim(),
       startTime: f.startTime, endTime: f.endTime,
       leads: f.leads.length ? f.leads : [15],
       topics: f.topics.split("\n").map((x) => x.trim()).filter(Boolean),
@@ -292,6 +292,9 @@ export function CreateForm({ dates = [], editMeeting = null, editId = null, onCr
         <div style={{ flex: "1 1 200px" }}><label style={label}>{t("label.location")}</label><input style={input} value={f.location} onChange={set("location")} placeholder={t("sched.locPlaceholder")} /></div>
         <div style={{ flex: "1 1 200px" }}><label style={label}>{t("label.hostFull")}</label><input style={input} value={f.host} onChange={set("host")} placeholder={t("sched.hostPlaceholder")} /></div>
       </div>
+      <div style={{ height: 14 }} />
+      <label style={label}>🔗 {t("label.online")}</label>
+      <input style={input} type="url" inputMode="url" value={f.onlineUrl} onChange={set("onlineUrl")} placeholder={t("sched.onlinePlaceholder")} />
 
       <div style={{ height: 14 }} />
       <label style={label}>{t("sched.visibility")}</label>

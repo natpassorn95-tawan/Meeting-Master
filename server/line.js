@@ -35,6 +35,27 @@ function authHeaders() {
 
 // Brand accent used across the app (purple).
 const ACCENT = "#534AB7";
+// Green used for the "join online meeting" call-to-action.
+const ONLINE_GREEN = "#0F6E56";
+
+// ── Online-meeting helpers ─────────────────────────────────────────────
+// Meetings may be in-person, online, or hybrid. `onlineUrl` is an optional
+// video-call link; when present we surface a prominent "Join online" button so
+// recipients can tap straight into the call from the LINE notice.
+function sanitizeUrl(u) {
+  const s = (u || "").trim();
+  if (!s) return "";
+  return /^https?:\/\//i.test(s) ? s : `https://${s}`;
+}
+// A green "Join online" Flex button for the meeting's link, or null if none.
+function joinOnlineButton(onlineUrl) {
+  const uri = sanitizeUrl(onlineUrl);
+  if (!uri) return null;
+  return {
+    type: "button", style: "primary", color: ONLINE_GREEN, height: "sm",
+    action: { type: "uri", label: "🔗 加入線上會議 Join online", uri },
+  };
+}
 
 // Build a deep link the LINE buttons point at.
 // • If LIFF_ID is set → a liff.line.me URL, so the page opens *inside LINE*
@@ -59,7 +80,9 @@ function intentUri(base, meetingId, intent) {
 export function buildNoticeFlex(meeting, baseUrl = "") {
   const title = meeting.title || "（未命名會議）";
   const datetime = meeting.datetime || "—";
-  const location = meeting.location || "—";
+  const onlineUrl = sanitizeUrl(meeting.onlineUrl);
+  // Online-only meetings often have no physical venue — show "Online" instead of "—".
+  const location = meeting.location || (onlineUrl ? "🔗 線上會議 Online" : "—");
   const host = meeting.host || "—";
   const base = (baseUrl || "").replace(/\/$/, "");
   const mid = meeting.id || "preview";
@@ -74,7 +97,10 @@ export function buildNoticeFlex(meeting, baseUrl = "") {
     ],
   });
 
+  const joinBtn = joinOnlineButton(onlineUrl);
   const footerButtons = [
+    // Online / hybrid meetings: a tap-to-join button sits at the top of the notice.
+    ...(joinBtn ? [joinBtn] : []),
     {
       type: "button",
       style: "primary",
@@ -244,28 +270,32 @@ function buildRemovalMessage(meeting, { deleted } = {}) {
   };
 }
 // One consolidated notice for a batch of meetings (same title/time, many dates).
-export function buildBatchNoticeMessage({ title, location, startTime, endTime, dates = [] }) {
+export function buildBatchNoticeMessage({ title, location, onlineUrl, startTime, endTime, dates = [] }) {
   const t = title || "（未命名會議）";
   const time = startTime ? (endTime ? `${startTime}–${endTime}` : startTime) : "";
   const dateRows = dates.map((d) => ({ type: "text", text: `・${d}${time ? `　${time}` : ""}`, size: "sm", color: "#333333", wrap: true }));
   const body = [];
   if (location) body.push({ type: "text", text: `📍 ${location}`, size: "sm", color: "#666666", wrap: true });
+  const joinBtn = joinOnlineButton(onlineUrl);
+  if (joinBtn) body.push({ type: "text", text: "🔗 線上會議 Online（見下方按鈕）", size: "sm", color: ONLINE_GREEN, wrap: true });
   body.push({ type: "text", text: `共 ${dates.length} 場 · Dates`, size: "xs", color: "#999999", margin: "md" });
   body.push(...dateRows);
+  const bubble = {
+    type: "bubble",
+    header: {
+      type: "box", layout: "vertical", backgroundColor: ACCENT, paddingAll: "16px",
+      contents: [
+        { type: "text", text: `📅 會議通知（共 ${dates.length} 場）`, color: "#FFFFFF", weight: "bold", size: "sm" },
+        { type: "text", text: t, color: "#FFFFFF", weight: "bold", size: "lg", wrap: true, margin: "sm" },
+      ],
+    },
+    body: { type: "box", layout: "vertical", spacing: "sm", paddingAll: "16px", contents: body },
+  };
+  if (joinBtn) bubble.footer = { type: "box", layout: "vertical", paddingAll: "16px", contents: [joinBtn] };
   return {
     type: "flex",
     altText: `【會議通知】${t}（共 ${dates.length} 場）`.slice(0, 400),
-    contents: {
-      type: "bubble",
-      header: {
-        type: "box", layout: "vertical", backgroundColor: ACCENT, paddingAll: "16px",
-        contents: [
-          { type: "text", text: `📅 會議通知（共 ${dates.length} 場）`, color: "#FFFFFF", weight: "bold", size: "sm" },
-          { type: "text", text: t, color: "#FFFFFF", weight: "bold", size: "lg", wrap: true, margin: "sm" },
-        ],
-      },
-      body: { type: "box", layout: "vertical", spacing: "sm", paddingAll: "16px", contents: body },
-    },
+    contents: bubble,
   };
 }
 // Flex card sent when a meeting's details are updated.
@@ -273,6 +303,7 @@ export function buildUpdateMessage(meeting) {
   const title = meeting.title || "（未命名會議）";
   const datetime = meeting.datetime || "—";
   const location = meeting.location || "";
+  const onlineUrl = sanitizeUrl(meeting.onlineUrl);
   const host = meeting.host || "";
   const AMBER = "#854F0B";
   const row = (label, value) => ({
@@ -284,23 +315,27 @@ export function buildUpdateMessage(meeting) {
   });
   const rows = [row("時間 Time", datetime)];
   if (location) rows.push(row("地點 Venue", location));
+  if (onlineUrl) rows.push(row("線上 Online", "見下方按鈕 See button"));
   if (host) rows.push(row("主持 Host", host));
   rows.push({ type: "separator", margin: "lg", color: "#EEEEEE" });
   rows.push({ type: "text", text: "此會議已更新，請查看最新資訊。The meeting has been updated.", size: "sm", color: AMBER, weight: "bold", wrap: true, margin: "lg" });
+  const bubble = {
+    type: "bubble",
+    header: {
+      type: "box", layout: "vertical", backgroundColor: AMBER, paddingAll: "16px",
+      contents: [
+        { type: "text", text: "🔄 會議已更新 Updated", color: "#FFFFFF", weight: "bold", size: "sm" },
+        { type: "text", text: title, color: "#FFFFFF", weight: "bold", size: "lg", wrap: true, margin: "sm" },
+      ],
+    },
+    body: { type: "box", layout: "vertical", spacing: "md", paddingAll: "16px", contents: rows },
+  };
+  const joinBtn = joinOnlineButton(onlineUrl);
+  if (joinBtn) bubble.footer = { type: "box", layout: "vertical", paddingAll: "16px", contents: [joinBtn] };
   return {
     type: "flex",
     altText: `【會議已更新】${title}｜${datetime}`.slice(0, 400),
-    contents: {
-      type: "bubble",
-      header: {
-        type: "box", layout: "vertical", backgroundColor: AMBER, paddingAll: "16px",
-        contents: [
-          { type: "text", text: "🔄 會議已更新 Updated", color: "#FFFFFF", weight: "bold", size: "sm" },
-          { type: "text", text: title, color: "#FFFFFF", weight: "bold", size: "lg", wrap: true, margin: "sm" },
-        ],
-      },
-      body: { type: "box", layout: "vertical", spacing: "md", paddingAll: "16px", contents: rows },
-    },
+    contents: bubble,
   };
 }
 export function buildCancelMessage(meeting) { return buildRemovalMessage(meeting, { deleted: false }); }
@@ -382,9 +417,13 @@ export function buildCheckinMessage(meeting, baseUrl = "", userId = "") {
         contents: [{ type: "text", text: `會議已開始（${meeting.datetime || ""}），請點選下方按鈕完成報到。`, size: "sm", color: "#333333", wrap: true }],
       },
       footer: {
-        type: "box", layout: "vertical", paddingAll: "16px",
-        contents: [{ type: "button", style: "primary", color: ACCENT, height: "sm",
-          action: { type: "uri", label: "🙋 立即報到", uri } }],
+        type: "box", layout: "vertical", spacing: "sm", paddingAll: "16px",
+        contents: [
+          { type: "button", style: "primary", color: ACCENT, height: "sm",
+            action: { type: "uri", label: "🙋 立即報到", uri } },
+          // Online / hybrid: let them jump into the call from the same card.
+          ...(joinOnlineButton(meeting.onlineUrl) ? [joinOnlineButton(meeting.onlineUrl)] : []),
+        ],
       },
     },
   };

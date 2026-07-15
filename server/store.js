@@ -177,6 +177,7 @@ function createMeeting(input) {
     // derive the display string from parts when present, else keep any literal
     datetime: (date ? fmtDatetime(date, startTime, endTime) : input.datetime) || "",
     location: input.location || "",
+    onlineUrl: normalizeUrl(input.onlineUrl), // optional video-call link (online / hybrid meetings)
     host: input.host || "",
     agendaUrl: input.agendaUrl || "",
     // Access control: public (default, everyone) or private (creator + invited).
@@ -198,6 +199,15 @@ function getMeeting(id) {
   return store.meetings[id] || null;
 }
 
+// Normalize a user-typed meeting link into a clickable https URL (or "").
+// A bare "meet.google.com/x" becomes "https://meet.google.com/x"; blanks stay
+// blank. Keeps LINE's URI actions valid (they require an http/https scheme).
+function normalizeUrl(u) {
+  const s = (u || "").trim();
+  if (!s) return "";
+  return /^https?:\/\//i.test(s) ? s : `https://${s}`;
+}
+
 // Update meeting basics without touching topics / roster / responses.
 function updateMeetingMeta(id, patch) {
   const m = getMeeting(id);
@@ -205,6 +215,7 @@ function updateMeetingMeta(id, patch) {
   for (const k of ["title", "location", "host", "date", "startTime", "endTime"]) {
     if (patch[k] != null) m[k] = patch[k];
   }
+  if (patch.onlineUrl != null) m.onlineUrl = normalizeUrl(patch.onlineUrl);
   if (patch.visibility === "public" || patch.visibility === "private") m.visibility = patch.visibility;
   if (Array.isArray(patch.attachments)) m.attachments = patch.attachments;
   m.datetime = m.date ? fmtDatetime(m.date, m.startTime, m.endTime) : (patch.datetime ?? m.datetime);
@@ -474,6 +485,7 @@ function createSchedule(input) {
     id,
     title: input.title || "（未命名定期會議）",
     location: input.location || "",
+    onlineUrl: normalizeUrl(input.onlineUrl), // optional video-call link (online / hybrid meetings)
     host: input.host || "",
     startTime: input.startTime || "14:00",
     endTime: input.endTime || "",

@@ -164,7 +164,12 @@ export default function HostDashboard({ meetingId, go }) {
       <div style={card}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
           <div>
-            <p style={{ margin: "0 0 2px", fontSize: 13, color: "var(--color-text-secondary)" }}>{meeting.datetime}・{meeting.location}・{t("label.host")}：{meeting.host}</p>
+            <p style={{ margin: "0 0 2px", fontSize: 13, color: "var(--color-text-secondary)" }}>{meeting.datetime}・{meeting.location || (meeting.onlineUrl ? t("label.online") : "—")}・{t("label.host")}：{meeting.host}</p>
+            {meeting.onlineUrl ? (
+              <p style={{ margin: "0 0 2px", fontSize: 13 }}>
+                <a href={meeting.onlineUrl} target="_blank" rel="noopener noreferrer" style={{ color: ACCENT, fontWeight: 600, wordBreak: "break-all" }}>🔗 {t("invite.joinOnline")}</a>
+              </p>
+            ) : null}
             <h2 style={{ margin: 0, fontSize: 20, fontWeight: 500 }}>{meeting.title}</h2>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>

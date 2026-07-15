@@ -191,6 +191,12 @@ function NoticeCard({ meeting, me, resp, t }) {
       <div style={{ padding: "16px 18px", display: "flex", flexDirection: "column", gap: 6 }}>
         {row(t("label.time"), meeting.datetime)}
         {row(t("label.location"), meeting.location)}
+        {meeting.onlineUrl ? (
+          <div style={{ display: "flex", gap: 8, fontSize: 14, lineHeight: 1.6 }}>
+            <span style={{ color: "#999", flex: "0 0 56px" }}>🔗</span>
+            <a href={meeting.onlineUrl} target="_blank" rel="noopener noreferrer" style={{ color: ACCENT, flex: 1, fontWeight: 600, wordBreak: "break-all" }}>{t("invite.joinOnline")}</a>
+          </div>
+        ) : null}
         {row(t("label.host"), meeting.host)}
         {me ? (
           <div style={{ marginTop: 8, paddingTop: 10, borderTop: "0.5px solid rgba(0,0,0,.08)", display: "flex", alignItems: "center", gap: 8, fontSize: 13, flexWrap: "wrap" }}>
@@ -376,6 +382,12 @@ function AgendaModal({ meeting, t, onClose }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 4, paddingBottom: 14, borderBottom: "0.5px solid rgba(0,0,0,.1)", marginBottom: 14 }}>
             {row(t("label.time"), meeting.datetime)}
             {row(t("label.location"), meeting.location)}
+            {meeting.onlineUrl ? (
+              <div style={{ display: "flex", gap: 8, fontSize: 14, lineHeight: 1.6 }}>
+                <span style={{ color: "#999", flex: "0 0 56px" }}>🔗</span>
+                <a href={meeting.onlineUrl} target="_blank" rel="noopener noreferrer" style={{ color: ACCENT, flex: 1, fontWeight: 600, wordBreak: "break-all" }}>{t("invite.joinOnline")}</a>
+              </div>
+            ) : null}
             {row(t("label.host"), meeting.host)}
           </div>
           {meeting.topics.length === 0 ? (

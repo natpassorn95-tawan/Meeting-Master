@@ -273,7 +273,7 @@ app.get("/api/meetings/:id/responses", (req, res) => {
   const uid = currentUser(req);
   if (uid && !canSee(m, uid)) return res.status(403).json({ error: "not visible to you", code: "not_visible" });
   res.json({
-    meeting: { id: m.id, title: m.title, datetime: m.datetime, location: m.location, host: m.host },
+    meeting: { id: m.id, title: m.title, datetime: m.datetime, location: m.location, onlineUrl: m.onlineUrl, host: m.host },
     topics: m.topics,
     roster: m.roster,
     responses: m.roster.map((p) => m.responses[p.id]),
@@ -369,7 +369,7 @@ app.get("/api/meetings/:id/participant/:pid", (req, res) => {
   const r = db.getResponse(req.params.id, req.params.pid);
   if (!m || !r) return res.status(404).json({ error: "not found" });
   res.json({
-    meeting: { id: m.id, title: m.title, datetime: m.datetime, location: m.location, host: m.host },
+    meeting: { id: m.id, title: m.title, datetime: m.datetime, location: m.location, onlineUrl: m.onlineUrl, host: m.host },
     topics: m.topics,
     response: r,
   });
@@ -567,7 +567,7 @@ function materializeOccurrence(scheduleId, occKey) {
   const recipients = s.recipientIds?.length ? s.roster.filter((p) => s.recipientIds.includes(p.id)) : s.roster;
   const m = db.getMeeting(`${scheduleId}__${occKey}`) || db.createMeeting({
     id: `${scheduleId}__${occKey}`, title: s.title, date: occKey, startTime: s.startTime, endTime: s.endTime,
-    location: s.location, host: s.host, topics: s.topics, attachments: s.attachments || [], roster: recipients,
+    location: s.location, onlineUrl: s.onlineUrl, host: s.host, topics: s.topics, attachments: s.attachments || [], roster: recipients,
     visibility: s.visibility, creatorId: s.creatorId,
   });
   db.applyStanding(m.id, scheduleId);
@@ -771,6 +771,7 @@ async function fireSchedule(s, { live = true } = {}) {
     startTime: s.startTime,
     endTime: s.endTime,
     location: s.location,
+    onlineUrl: s.onlineUrl,
     host: s.host,
     topics: s.topics,
     attachments: s.attachments || [],
@@ -818,7 +819,7 @@ app.get("/api/calendar", (req, res) => {
     if (!canSee(m, uid)) continue; // private meetings only for creator + invited
     const ms = Date.parse(`${m.date}T00:00:00`);
     if (ms >= fromMs && ms <= toMs) {
-      events.push({ type: "meeting", id: m.id, date: m.date, title: m.title, startTime: m.startTime, endTime: m.endTime, location: m.location, count: m.roster.length });
+      events.push({ type: "meeting", id: m.id, date: m.date, title: m.title, startTime: m.startTime, endTime: m.endTime, location: m.location, onlineUrl: m.onlineUrl, count: m.roster.length });
     }
   }
   for (const s of db.listSchedules()) {
@@ -829,7 +830,7 @@ app.get("/api/calendar", (req, res) => {
       const occId = `${s.id}__${occKey}`;
       if (db.getMeeting(occId)) continue; // already materialised → shown as a meeting
       if (db.isTrashed(occId)) continue;  // deleted by the host → stays in the trash, don't re-project
-      events.push({ type: "scheduled", scheduleId: s.id, occKey, date: occKey, title: s.title, startTime: s.startTime, endTime: s.endTime, location: s.location, count: s.recipientIds?.length || s.roster.length });
+      events.push({ type: "scheduled", scheduleId: s.id, occKey, date: occKey, title: s.title, startTime: s.startTime, endTime: s.endTime, location: s.location, onlineUrl: s.onlineUrl, count: s.recipientIds?.length || s.roster.length });
     }
   }
   res.json(events);
@@ -850,7 +851,7 @@ app.post("/api/schedules/:id/materialize", (req, res) => {
     const recipients = s.recipientIds?.length ? s.roster.filter((p) => s.recipientIds.includes(p.id)) : s.roster;
     m = db.createMeeting({
       id: meetingId, title: s.title, date: occKey, startTime: s.startTime, endTime: s.endTime,
-      location: s.location, host: s.host, topics: s.topics, attachments: s.attachments || [], roster: recipients,
+      location: s.location, onlineUrl: s.onlineUrl, host: s.host, topics: s.topics, attachments: s.attachments || [], roster: recipients,
       visibility: s.visibility, creatorId: s.creatorId,
     });
   }
@@ -915,7 +916,7 @@ app.post("/api/schedules/notify-batch", async (req, res) => {
   const dates = scheds.map((s) => s.recurrence?.date).filter(Boolean).sort();
   let pushed = 0;
   if (LINE_CONFIGURED && recipients.size && dates.length) {
-    const msg = [buildBatchNoticeMessage({ title: first.title, location: first.location, startTime: first.startTime, endTime: first.endTime, dates })];
+    const msg = [buildBatchNoticeMessage({ title: first.title, location: first.location, onlineUrl: first.onlineUrl, startTime: first.startTime, endTime: first.endTime, dates })];
     for (const rid of recipients) { try { await pushTo(rid, msg); pushed++; } catch { /* keep going */ } }
   }
   res.json({ ok: true, pushed, meetings: scheds.length });

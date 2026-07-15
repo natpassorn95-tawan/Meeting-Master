@@ -74,9 +74,15 @@ export default function CheckIn({ meetingId, userId }) {
         <div style={{ background: ACCENT, color: "#fff", padding: "16px 18px" }}>
           <div style={{ fontSize: 12, fontWeight: 700, opacity: 0.9 }}>🙋 {t("checkin.title")}</div>
           <div style={{ fontSize: 19, fontWeight: 700, marginTop: 4 }}>{meeting.title || "（未命名會議）"}</div>
-          <div style={{ fontSize: 13, opacity: 0.95, marginTop: 4 }}>{meeting.datetime}{meeting.location ? `・${meeting.location}` : ""}</div>
+          <div style={{ fontSize: 13, opacity: 0.95, marginTop: 4 }}>{meeting.datetime}{meeting.location ? `・${meeting.location}` : (meeting.onlineUrl ? "・🔗 線上 Online" : "")}</div>
         </div>
         <div style={{ padding: "18px" }}>
+          {meeting.onlineUrl ? (
+            <a href={meeting.onlineUrl} target="_blank" rel="noopener noreferrer"
+              style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", height: 46, marginBottom: 16, fontSize: 15, fontWeight: 600, borderRadius: 8, background: GREEN, color: "#fff", textDecoration: "none", boxSizing: "border-box" }}>
+              🔗 {t("invite.joinOnline")}
+            </a>
+          ) : null}
           {(ended || notStarted) && !me?.checkedInAt ? (
             <div style={{ textAlign: "center", padding: "0.5rem 0" }}>
               <div style={{ width: 56, height: 56, borderRadius: "50%", background: "rgba(0,0,0,.06)", color: "#888", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, margin: "0 auto 12px" }}>🔒</div>
