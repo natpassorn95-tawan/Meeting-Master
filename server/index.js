@@ -91,6 +91,29 @@ app.post("/api/uploads", (req, res) => {
   res.json({ url: `/uploads/${fname}`, name: name || fname, type: type || m[1], size: buf.length });
 });
 
+// ── Which build is this? ───────────────────────────────────────────────
+// "The fix isn't working" and "the fix isn't deployed" look identical from
+// the outside, and answering that used to mean shelling into the host. This
+// makes it a URL: open /api/version on any instance and compare the commit
+// with `git log -1` locally. MM_COMMIT lets a Docker build stamp it in, since
+// the image carries no .git directory.
+const BUILD = (() => {
+  const root = fileURLToPath(new URL("..", import.meta.url));
+  let version = "unknown";
+  try { version = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version; } catch { /* keep unknown */ }
+  let commit = (process.env.MM_COMMIT || "").trim();
+  if (!commit) {
+    try {
+      const head = fs.readFileSync(path.join(root, ".git", "HEAD"), "utf8").trim();
+      const ref = head.startsWith("ref: ") ? head.slice(5) : null;
+      commit = (ref ? fs.readFileSync(path.join(root, ".git", ref), "utf8") : head).trim().slice(0, 7);
+    } catch { commit = "unknown"; }
+  }
+  return { version, commit, startedAt: new Date().toISOString() };
+})();
+
+app.get("/api/version", (_req, res) => res.json(BUILD));
+
 // ── LINE connection ────────────────────────────────────────────────────
 app.get("/api/line/status", async (_req, res) => {
   if (!LINE_CONFIGURED) {

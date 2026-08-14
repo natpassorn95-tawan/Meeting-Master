@@ -30,6 +30,13 @@ refs rather than free-form prose.
   the schedule's attachments (`store.withScheduleAttachments`); a file set on the
   meeting itself still wins. Regression tests in `server/attachments.test.js`.
 
+### Added
+- `GET /api/version` — reports `{version, commit, startedAt}` so an operator can
+  tell in one request whether a host is running the code they just deployed.
+  "The fix doesn't work" and "the fix isn't deployed" were otherwise
+  indistinguishable without shelling into the machine. Reads `.git/HEAD`; pass
+  `MM_COMMIT` for Docker images, which carry no `.git`.
+
 ### Changed
 - **The store is now written atomically.** `saveStore()` writes to a temp file,
   `fsync`s, and renames into place, keeping the previous version as

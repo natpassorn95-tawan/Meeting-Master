@@ -50,6 +50,21 @@ release already ships `dist\`.
 > Never run `npm ci --omit=dev` here — `express` is a devDependency in this
 > project, so omitting dev dependencies breaks the server at runtime.
 
+## Which build is a host running?
+
+```
+http://<host>:8899/api/version   →  {"version":"0.1.0","commit":"5aba60e","startedAt":"…"}
+```
+
+Compare `commit` with `git log -1 --format=%h` on your machine. If they differ,
+that host has not been deployed — which is the usual reason a fix that passes
+locally "still doesn't work" in production. `startedAt` shows when the process
+last restarted; a deploy that didn't restart the service leaves the old code
+running.
+
+The commit is read from `.git/HEAD`. A Docker image has no `.git`, so pass
+`MM_COMMIT` at build/run time there.
+
 ## Backups
 
 ```bash
