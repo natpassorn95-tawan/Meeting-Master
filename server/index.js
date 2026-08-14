@@ -208,7 +208,7 @@ app.get("/api/meetings/:id", (req, res) => {
   if (!m) return res.status(404).json({ error: "meeting not found" });
   const uid = currentUser(req);
   if (uid && !canSee(m, uid)) return res.status(403).json({ error: "not visible to you", code: "not_visible" });
-  res.json(m);
+  res.json(db.withScheduleAttachments(m));
 });
 
 // Admin maintenance: edit meeting basics / agenda / roster (responses kept).

@@ -29,17 +29,39 @@ function fmtDatetime(date, start, end) {
 const store = { meetings: {}, order: [], schedules: {}, scheduleOrder: [], members: {}, standing: {}, deleted: {}, cancelled: {}, tombstones: {} };
 
 // ── Persistence (data/store.json) ──────────────────────────────────────
-const DATA_FILE = fileURLToPath(new URL("../data/store.json", import.meta.url));
+// MM_DATA_FILE relocates the store (tests point it at a temp dir; an operator
+// can point it at a different disk). Defaults to data/store.json beside the app.
+const DATA_FILE = process.env.MM_DATA_FILE
+  ? path.resolve(process.env.MM_DATA_FILE)
+  : fileURLToPath(new URL("../data/store.json", import.meta.url));
+// Previous good copy, rotated on every save. A crash mid-save can at worst lose
+// the last write, never the whole dataset — loadStore() falls back to this.
+const BACKUP_FILE = `${DATA_FILE}.bak`;
+const TEMP_FILE = `${DATA_FILE}.tmp`;
 let saveTimer = null;
 
+// Atomic save: serialise → temp file → fsync → swap into place by rename.
+// Writing straight to DATA_FILE (as this used to) meant a crash or power cut
+// part-way through could truncate the ONLY copy of the data.
 function saveStore() {
   try {
     fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
-    fs.writeFileSync(DATA_FILE, JSON.stringify({
+    const json = JSON.stringify({
       meetings: store.meetings, order: store.order,
       schedules: store.schedules, scheduleOrder: store.scheduleOrder,
       members: store.members, standing: store.standing, deleted: store.deleted, cancelled: store.cancelled, tombstones: store.tombstones, seq,
-    }));
+    });
+    // Force the bytes to disk before the rename, so the swap can never publish
+    // a file whose contents are still sitting in the OS write cache.
+    const fd = fs.openSync(TEMP_FILE, "w");
+    try {
+      fs.writeFileSync(fd, json);
+      fs.fsyncSync(fd);
+    } finally { fs.closeSync(fd); }
+    // Keep the outgoing version as .bak, then publish the new one. Both renames
+    // are atomic, so a reader never sees a half-written file.
+    if (fs.existsSync(DATA_FILE)) fs.renameSync(DATA_FILE, BACKUP_FILE);
+    fs.renameSync(TEMP_FILE, DATA_FILE);
   } catch (e) { console.error("[store] save failed", e.message); }
 }
 // Debounced save — call after any mutation.
@@ -48,9 +70,31 @@ function persist() {
   saveTimer = setTimeout(() => { saveTimer = null; saveStore(); }, 400);
 }
 function loadStore() {
-  try {
-    if (!fs.existsSync(DATA_FILE)) return;
-    const d = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+  // Prefer the live file; fall back to the rotated .bak if it is missing or
+  // unparseable (interrupted save, disk full, bad copy). Silently starting
+  // empty on a corrupt file is how a whole dataset disappears unnoticed.
+  for (const file of [DATA_FILE, BACKUP_FILE]) {
+    if (!fs.existsSync(file)) continue;
+    try {
+      readStoreFile(file);
+      if (file === BACKUP_FILE) console.warn(`[store] ⚠ recovered from ${path.basename(BACKUP_FILE)} — ${path.basename(DATA_FILE)} was missing or corrupt`);
+      return;
+    } catch (e) {
+      console.error(`[store] load failed from ${path.basename(file)}: ${e.message}`);
+      // Keep the bad file for forensics instead of letting the next save
+      // overwrite it — an operator can still hand-repair the JSON.
+      if (file === DATA_FILE) {
+        try { fs.copyFileSync(file, `${DATA_FILE}.corrupt`); } catch { /* best effort */ }
+      }
+    }
+  }
+  console.warn("[store] no readable store found — starting fresh");
+}
+
+// Throws on a missing/corrupt file so loadStore() can try the next candidate.
+function readStoreFile(file) {
+  {
+    const d = JSON.parse(fs.readFileSync(file, "utf8"));
     store.meetings = d.meetings || {};
     store.order = d.order || [];
     store.schedules = d.schedules || {};
@@ -62,7 +106,7 @@ function loadStore() {
     store.tombstones = d.tombstones || {};
     if (typeof d.seq === "number") seq = d.seq;
     console.log(`[store] loaded ${store.order.length} meetings, ${store.scheduleOrder.length} schedules, ${Object.keys(store.members).length} members`);
-  } catch (e) { console.error("[store] load failed (starting fresh)", e.message); }
+  }
 }
 
 // ── Standing (default) attendance per recurring schedule ────────────────
@@ -652,6 +696,20 @@ export { ymd, nextOccurrence, occurrencesInRange, recurrenceSummary, decorateSch
 // A participant's meetings (by name). One row per schedule = the NEAREST
 // upcoming occurrence (weekly/monthly collapse to a single row); one-time
 // meetings show their single date. Plus any standalone meetings they're on.
+// A materialised occurrence snapshots the schedule's attachments at the moment
+// it is created, so a file the creator adds to the schedule AFTERWARDS never
+// reaches a participant who opens that occurrence directly. memberUpcoming()
+// already falls back to the schedule for My Meetings; this gives the single
+// meeting read the same behaviour, so the file shows on both screens.
+// Attachments only — topics deliberately do NOT fall back here, because the
+// agenda comment form is keyed by topic id and schedule topics carry no ids.
+function withScheduleAttachments(m) {
+  if (!m || m.attachments?.length) return m;
+  const s = store.schedules[scheduleIdOf(m.id) || ""];
+  if (!s?.attachments?.length) return m;
+  return { ...m, attachments: s.attachments };
+}
+
 function memberUpcoming(name, fromMs, toMs) {
   const out = [];
   const seenSchedules = new Set();
@@ -824,6 +882,7 @@ export {
   markAgendaRead,
   setComment,
   linkLineUser,
+  withScheduleAttachments,
   loadStore,
   saveStore,
   persist,
