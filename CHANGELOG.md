@@ -8,6 +8,20 @@ refs rather than free-form prose.
 ## Unreleased
 
 ### Fixed
+- **Editing a meeting wiped every response it had collected.** The editor
+  re-sends roster and topics as plain `{name}` / `{title}` with no ids, so
+  `setRoster`/`setTopics` minted fresh ids and discarded all RSVPs, leave
+  reasons, agenda-read flags, check-in/out times and pre-filled comments —
+  correcting a meeting's time cost the creator the whole picture. Both now
+  match an existing entry by id, then `lineUserId`, then name/title, and keep
+  its id (and `employeeId`, previously nulled). Removing someone from the
+  roster still drops them.
+- **Occurrence edits never reached 我的會議.** `memberUpcoming` read title,
+  times, location and link off the *schedule*, so pushing an end time back
+  because a meeting ran late showed the creator the new time and the
+  participant the old one. A materialised occurrence is now the source of
+  truth for its own details; occurrences that were never edited still follow
+  the schedule.
 - **Agenda attachments were invisible to participants.** A file the creator
   attached to a recurring schedule *after* an occurrence had been materialised
   never reached the participant opening that occurrence's agenda: the meeting

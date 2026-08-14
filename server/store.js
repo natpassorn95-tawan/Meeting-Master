@@ -271,9 +271,27 @@ function updateMeetingMeta(id, patch) {
 function setTopics(id, topics) {
   const m = getMeeting(id);
   if (!m) return null;
+  // Same trap as setRoster: the editor re-sends topics as plain { title }, and
+  // pre-filled comments are keyed by topic id — minting new ids orphaned every
+  // comment. Reuse the existing topic's id when the title is unchanged.
+  const claimed = new Set();
+  const matchExisting = (t) => {
+    const title = (t.title || "").trim();
+    const candidates = [t.id && m.topics.find((x) => x.id === t.id), m.topics.find((x) => x.title === title)];
+    return candidates.find((x) => x && !claimed.has(x.id)) || null;
+  };
   m.topics = (topics || [])
-    .map((t, i) => ({ id: t.id || uid("T"), order: i + 1, title: (t.title || "").trim(), description: t.description || "" }))
-    .filter((t) => t.title);
+    .filter((t) => (t.title || "").trim())
+    .map((t, i) => {
+      const prev = matchExisting(t);
+      if (prev) claimed.add(prev.id);
+      return {
+        id: prev?.id || t.id || uid("T"),
+        order: i + 1,
+        title: (t.title || "").trim(),
+        description: t.description || prev?.description || "",
+      };
+    });
   return m;
 }
 
@@ -282,9 +300,37 @@ function setTopics(id, topics) {
 function setRoster(id, roster) {
   const m = getMeeting(id);
   if (!m) return null;
+  // The meeting editor re-sends the roster as plain { name, dept, lineUserId }
+  // with no participant ids (Schedules.jsx CreateForm). Keying only on `id`
+  // therefore minted a fresh id for everyone and silently discarded every RSVP,
+  // leave reason, agenda-read flag, check-in/out and pre-filled comment — so
+  // simply correcting a meeting's time wiped the responses it had collected.
+  // Match on whatever identity the caller does supply: id, then lineUserId,
+  // then name. Each existing participant can only be claimed once.
+  const claimed = new Set();
+  const matchExisting = (r) => {
+    const name = (r.name || "").trim();
+    const candidates = [
+      r.id && m.roster.find((p) => p.id === r.id),
+      r.lineUserId && m.roster.find((p) => p.lineUserId === r.lineUserId),
+      m.roster.find((p) => p.name === name),
+    ];
+    return candidates.find((p) => p && !claimed.has(p.id)) || null;
+  };
   const next = (roster || [])
-    .map((r) => ({ id: r.id || uid("P"), name: (r.name || "").trim(), dept: r.dept || "—", lineUserId: r.lineUserId || null }))
-    .filter((r) => r.name);
+    .filter((r) => (r.name || "").trim())
+    .map((r) => {
+      const prev = matchExisting(r);
+      if (prev) claimed.add(prev.id);
+      return {
+        id: prev?.id || r.id || uid("P"),
+        name: (r.name || "").trim(),
+        dept: r.dept || prev?.dept || "—",
+        // Preserve details the editor never sends back rather than nulling them.
+        employeeId: r.employeeId || prev?.employeeId || "",
+        lineUserId: r.lineUserId || prev?.lineUserId || null,
+      };
+    });
   const responses = {};
   for (const p of next) {
     const existing = m.responses[p.id] || blankResponse(p);
@@ -742,10 +788,21 @@ function memberUpcoming(name, fromMs, toMs) {
     const tsrc = (inst?.topics?.length ? inst.topics : s.topics) || [];
     const topics = tsrc.map((tp) => ({ title: tp.title || "", description: tp.description || "" })).filter((tp) => tp.title);
     const attachments = (inst?.attachments?.length ? inst.attachments : s.attachments) || [];
+    // Once an occurrence has been materialised it becomes the source of truth
+    // for its own details: the creator edits THAT record when a meeting runs
+    // late or moves. Reading title/time off the schedule meant those edits
+    // never reached 我的會議, so participants kept seeing the original slot.
+    // `occKey` still identifies the occurrence — only the display date follows
+    // the edit.
     out.push({
       kind: status || (active ? "meeting" : "scheduled"), status,
       scheduleId: s.id, occKey, meetingId: active?.id,
-      date: occKey, title: s.title, startTime: s.startTime, endTime: s.endTime,
+      date: inst?.date || occKey,
+      title: inst?.title || s.title,
+      startTime: inst?.startTime || s.startTime,
+      endTime: inst?.endTime || s.endTime,
+      location: inst?.location || s.location || "",
+      onlineUrl: inst?.onlineUrl || s.onlineUrl || "",
       recurring: s.recurrence.freq !== "once", rsvp, leaveReason, checkedInAt, checkedOutAt, topics, attachments,
     });
   }
