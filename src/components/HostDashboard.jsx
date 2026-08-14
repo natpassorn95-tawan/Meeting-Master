@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { api } from "../api.js";
 import { card, btn, pill, avatar, GREEN, RED, ACCENT, AMBER, STANCE_META } from "../ui.js";
 import { useT } from "../i18n.jsx";
-import { RecipientPicker } from "./Schedules.jsx";
+import { RecipientPicker, attIcon } from "./Schedules.jsx";
 
 export default function HostDashboard({ meetingId, go }) {
   const { t, lang } = useT();
@@ -35,7 +35,7 @@ export default function HostDashboard({ meetingId, go }) {
   if (error) return <p style={{ color: RED }}>⚠ {error}</p>;
   if (!data) return <p style={{ color: "var(--color-text-secondary)" }}>{t("common.loading")}</p>;
 
-  const { meeting, topics, roster, responses } = data;
+  const { meeting, topics, roster, responses, attachments = [] } = data;
   const byId = Object.fromEntries(responses.map((r) => [r.participantId, r]));
   const confirmed = responses.filter((r) => r.rsvp === "yes").length;
   const onLeave = responses.filter((r) => r.rsvp === "leave").length;
@@ -171,6 +171,20 @@ export default function HostDashboard({ meetingId, go }) {
               </p>
             ) : null}
             <h2 style={{ margin: 0, fontSize: 20, fontWeight: 500 }}>{meeting.title}</h2>
+            {/* What the participants were sent. The host manages the meeting
+                from here, so the attached files have to be reachable here. */}
+            {attachments.length ? (
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginTop: 10 }}>
+                <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>{t("agenda.attachments")}</span>
+                {attachments.map((a) => (
+                  <a key={a.url} href={a.url} target="_blank" rel="noreferrer"
+                    style={{ display: "inline-flex", alignItems: "center", gap: 5, maxWidth: 240, padding: "4px 9px", fontSize: 12, borderRadius: 8, border: "0.5px solid rgba(0,0,0,.18)", background: "#fff", color: "var(--color-text-primary)", textDecoration: "none" }}>
+                    <span>{attIcon(a.type, a.name)}</span>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.name}</span>
+                  </a>
+                ))}
+              </div>
+            ) : null}
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button onClick={() => go("host", { m: meetingId })} style={{ ...btn(false), height: 34, fontSize: 13 }}>{t("host.backToCalendar")}</button>

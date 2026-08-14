@@ -300,6 +300,11 @@ app.get("/api/meetings/:id/responses", (req, res) => {
   res.json({
     meeting: { id: m.id, title: m.title, datetime: m.datetime, location: m.location, onlineUrl: m.onlineUrl, host: m.host },
     topics: m.topics,
+    // The host needs to see what participants were sent — the dashboard used
+    // to omit attachments entirely, so a file the creator attached was
+    // invisible on the very screen they manage the meeting from. Same
+    // schedule fallback as the participant views.
+    attachments: db.withScheduleAttachments(m).attachments || [],
     roster: m.roster,
     responses: m.roster.map((p) => m.responses[p.id]),
   });
