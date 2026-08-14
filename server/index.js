@@ -1003,21 +1003,14 @@ async function tick() {
   for (const real of db.listSchedules().map((s) => db.getSchedule(s.id)).filter(Boolean)) {
     if (!real.enabled) continue;
 
-    // Check-in: when an occurrence has just started, push the check-in button
-    // once to attendees who CONFIRMED or READ THE AGENDA (eligibleForCheckin).
-    // Non-responders aren't pushed — they find check-in in 我的會議 / My Meetings.
+    // Materialise an occurrence that has just started, so the meeting-driven
+    // check-in pass below has a concrete record to work from. Only the
+    // occurrence is created here — whether to push is decided there, from the
+    // meeting's own times.
     const recent = db.occurrencesInRange(real, now - CHECKIN_WINDOW_MS, now);
     const started = recent.length ? recent[recent.length - 1] : null;
     if (started && !db.isTrashed(`${real.id}__${db.ymd(started)}`)) {
-      const ck = `${db.ymd(started)}@checkin`;
-      if (!real.fired[ck]) {
-        real.fired[ck] = true;
-        if (AUTOSEND) {
-          const meeting = materializeOccurrence(real.id, db.ymd(started));
-          const r = meeting ? await sendCheckin(meeting) : { pushed: 0 };
-          console.log(`[scheduler] check-in sent "${real.title}" ${db.ymd(started)} → ${r.pushed} pushed`);
-        }
-      }
+      materializeOccurrence(real.id, db.ymd(started));
     }
 
     // Lead-time notices: need the next upcoming occurrence.
@@ -1042,6 +1035,36 @@ async function tick() {
         real.fired[key] = true;
       }
     }
+  }
+
+  // ── Check-in, driven by each meeting's OWN window ────────────────────
+  // This used to be keyed off the schedule's projected start time, so a
+  // creator's edit never reached it: push the end time out because a meeting
+  // is running late, or move the start, and the prompt still fired against the
+  // original slot (and, being deduped schedule-side, re-fired after a restart
+  // inside the 2h window). checkinOpen() reads the meeting's real
+  // date/start/end — the same rule the check-in screen and 我的會議 use — so
+  // the notification now follows whatever the creator last saved.
+  // Standalone meetings get an auto check-in for the first time too; they were
+  // skipped entirely when only schedules were scanned.
+  for (const m of db.listMeetings()) {
+    if (m.checkinPushedAt || !checkinOpen(m)) continue;
+    // Occurrences already pushed under the old schedule-side flag must not be
+    // pushed a second time after this upgrade.
+    const sid = db.scheduleIdOf(m.id);
+    const s = sid ? db.getSchedule(sid) : null;
+    const legacyKey = sid ? `${m.id.slice(sid.length + 2)}@checkin` : null;
+    if (s && legacyKey && s.fired?.[legacyKey]) { m.checkinPushedAt = Date.now(); continue; }
+
+    m.checkinPushedAt = Date.now(); // set BEFORE sending: never double-push
+    if (s && legacyKey) s.fired[legacyKey] = true;
+    if (AUTOSEND) {
+      const r = await sendCheckin(m);
+      console.log(`[scheduler] check-in sent "${m.title}" ${m.date} ${m.startTime}-${m.endTime} → ${r.pushed} pushed, ${r.skipped} skipped`);
+    } else {
+      console.log(`[scheduler] check-in window open for "${m.title}" ${m.date} ${m.startTime}-${m.endTime} (AUTOSEND off)`);
+    }
+    db.persist();
   }
 }
 setInterval(() => { tick().catch((e) => console.error("[scheduler]", e.message)); }, 60_000);
