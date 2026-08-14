@@ -1,0 +1,27 @@
+# Meeting Master (會議大師) — single-container stack.
+# Express serves the web bundle + /api on port 8899.
+services:
+  meeting-master:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: meeting-master:local
+    container_name: meeting-master
+    ports:
+      # host:container — open http://localhost:8898
+      # Host port is 8898 (not 8899) to avoid clashing with a local `npm run dev`
+      # instance that binds :8899 on the host. Change the left side to "8899:8899"
+      # once the host dev server is stopped.
+      - "8898:8899"
+    env_file:
+      # LINE tokens, PUBLIC_BASE_URL, LIFF_ID, identity-service, Aiai Board, etc.
+      # App boots fine with these blank/missing — LINE + scheduler degrade gracefully.
+      - .env
+    environment:
+      # Port the server binds to (matches the published port above).
+      PORT: "8899"
+    volumes:
+      # State survives container restarts + rebuilds (file store + uploaded files).
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+    restart: unless-stopped

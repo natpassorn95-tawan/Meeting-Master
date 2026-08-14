@@ -1,0 +1,26 @@
+# Dependencies + build output are produced inside the image (never copy host copies).
+node_modules
+.npm-cache
+dist
+
+# Secrets: provided at runtime via docker-compose `env_file: .env`, never baked in.
+.env
+*.local
+
+# Persistent state: bind-mounted as volumes, must not be copied into the image.
+data
+uploads
+# Backups hold the same staff PII as the store — never bake them into an image.
+backups
+
+# VCS + OS + local tooling not needed for the build.
+.git
+.gitignore
+.DS_Store
+tunnel-keeper.sh
+
+# Docs / assets not needed at build or runtime.
+docs
+richmenu
+Dockerfile
+docker-compose.yml
