@@ -171,20 +171,6 @@ export default function HostDashboard({ meetingId, go }) {
               </p>
             ) : null}
             <h2 style={{ margin: 0, fontSize: 20, fontWeight: 500 }}>{meeting.title}</h2>
-            {/* What the participants were sent. The host manages the meeting
-                from here, so the attached files have to be reachable here. */}
-            {attachments.length ? (
-              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginTop: 10 }}>
-                <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>{t("agenda.attachments")}</span>
-                {attachments.map((a) => (
-                  <a key={a.url} href={a.url} target="_blank" rel="noreferrer"
-                    style={{ display: "inline-flex", alignItems: "center", gap: 5, maxWidth: 240, padding: "4px 9px", fontSize: 12, borderRadius: 8, border: "0.5px solid rgba(0,0,0,.18)", background: "#fff", color: "var(--color-text-primary)", textDecoration: "none" }}>
-                    <span>{attIcon(a.type, a.name)}</span>
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.name}</span>
-                  </a>
-                ))}
-              </div>
-            ) : null}
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button onClick={() => go("host", { m: meetingId })} style={{ ...btn(false), height: 34, fontSize: 13 }}>{t("host.backToCalendar")}</button>
@@ -297,6 +283,21 @@ export default function HostDashboard({ meetingId, go }) {
 
       <div style={card}>
         <h3 style={{ margin: "0 0 14px", fontSize: 16, fontWeight: 500 }}>{t("host.rollup")}</h3>
+        {/* The files that went out with this agenda. They live here, with the
+            agenda itself, rather than in the header — where they sat directly
+            above 取消會議 / 刪除會議 and read as part of that button row. */}
+        {attachments.length ? (
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginBottom: 16, paddingBottom: 16, borderBottom: "0.5px solid rgba(0,0,0,.08)" }}>
+            <span style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>{t("agenda.attachments")}</span>
+            {attachments.map((a) => (
+              <a key={a.url} href={a.url} target="_blank" rel="noreferrer"
+                style={{ display: "inline-flex", alignItems: "center", gap: 5, maxWidth: 240, padding: "6px 10px", fontSize: 13, borderRadius: 8, border: "0.5px solid rgba(0,0,0,.18)", background: "#fff", color: "var(--color-text-primary)", textDecoration: "none" }}>
+                <span>{attIcon(a.type, a.name)}</span>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.name}</span>
+              </a>
+            ))}
+          </div>
+        ) : null}
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {topics.map((tp) => {
             const remarks = responses
