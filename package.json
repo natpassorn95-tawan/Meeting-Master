@@ -25,5 +25,8 @@
     "concurrently": "^9.1.2",
     "express": "^4.21.2",
     "vite": "^6.0.7"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true
   }
 }
