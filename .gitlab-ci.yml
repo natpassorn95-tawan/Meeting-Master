@@ -12,6 +12,7 @@
 
 stages:
   - test
+  - deploy
 
 verify:
   stage: test
@@ -31,3 +32,34 @@ verify:
     paths:
       - dist/
     expire_in: 1 week
+
+# One-click deploy to the Windows host at D:\meeting_master.
+#
+# Manual on purpose. Pushes come in bursts (11 commits in a day, then a month
+# of quiet), and a deploy restarts the app for a minute or two - so the useful
+# thing to automate is the *procedure*, not the decision of when to run it.
+#
+# Runs only on main, so an unreviewed branch cannot be put on the host: to
+# deploy something it has to be merged first.
+#
+# Deploys $CI_COMMIT_SHA rather than whatever main is at run time, so the host
+# ends up running exactly the commit this pipeline tested.
+#
+# Safe to press at any hour: the job refuses while a meeting is in progress,
+# because check-in only works during the meeting and a restart would break it
+# for the people in the room. Whoever presses the button cannot see today's
+# schedule, so the deploy checks instead of asking them to remember.
+deploy:
+  stage: deploy
+  tags:
+    - meeting-master-host
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual
+  # A blocked deploy (meeting running) should read as "not now", not "broken".
+  allow_failure: true
+  environment:
+    name: production
+    url: http://192.168.1.241:8899
+  script:
+    - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy-host.ps1 -Sha $CI_COMMIT_SHA
