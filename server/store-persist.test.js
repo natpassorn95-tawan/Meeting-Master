@@ -11,9 +11,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 
-const STORE = fileURLToPath(new URL("./store.js", import.meta.url));
+// A file:// URL, not a filesystem path: this string is used as an ESM import
+// specifier in the child process below, and Node rejects a bare Windows drive
+// path there ("C:\..." -> ERR_UNSUPPORTED_ESM_URL_SCHEME). On POSIX the two
+// forms happen to be interchangeable, which is why this only failed on Windows.
+const STORE = new URL("./store.js", import.meta.url).href;
 
 function tmpStoreFile() {
   return path.join(fs.mkdtempSync(path.join(os.tmpdir(), "mm-store-")), "store.json");
