@@ -52,6 +52,16 @@ refs rather than free-form prose.
   `MM_COMMIT` for Docker images, which carry no `.git`.
 
 ### Changed
+- **Inviting attendees no longer requires being the meeting's creator.** Any
+  registered console member may add attendees; the console identity is
+  per-browser, so tying invite to the exact creator locked out even the creator
+  once they signed in under a different name on another device, and left
+  meetings nobody present could staff. Editing, cancelling and deleting remain
+  creator-only — this widens who can staff a meeting, not who can break one.
+  The 403 now distinguishes "not signed in" from "not a registered member"
+  instead of always claiming a permission problem. **Needs Duke's review**: it
+  relaxes an authorization rule (see ADR-0028 D-1 — the module has no real
+  authentication; `x-mm-user` is client-supplied).
 - **The store is now written atomically.** `saveStore()` writes to a temp file,
   `fsync`s, and renames into place, keeping the previous version as
   `data/store.json.bak`; `loadStore()` falls back to that `.bak` when the live

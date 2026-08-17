@@ -162,6 +162,18 @@ function canEdit(obj, uid) {
   if (!obj.creatorId) return true;          // legacy (no creator) → anyone can manage
   return obj.creatorId === uid;             // otherwise only the creator
 }
+// Inviting is collaborative: several admins share meeting admin here, and the
+// console identity is per-browser, so tying invite to the exact creator left
+// meetings that nobody present could staff — the creator themselves gets locked
+// out after picking a different name on another device. Any registered member
+// may add attendees. Destructive actions (edit / cancel / delete) stay
+// creator-only, so this widens who can staff a meeting, not who can break one.
+function canInvite(obj, uid) {
+  if (!obj) return false;
+  if (canEdit(obj, uid)) return true;
+  const member = uid ? db.getMember(uid) : null;
+  return !!member && member.status === "registered" && member.active !== false;
+}
 
 // ── Meetings ─────────────────────────────────────────────────────────
 app.get("/api/meetings", (req, res) => res.json(db.listMeetings().filter((m) => canSee(m, currentUser(req)))));
@@ -261,7 +273,13 @@ app.put("/api/meetings/:id/roster", (req, res) => {
 app.post("/api/meetings/:id/invite", async (req, res) => {
   const m = db.getMeeting(req.params.id);
   if (!m) return res.status(404).json({ error: "meeting not found" });
-  if (!canEdit(m, currentUser(req))) return res.status(403).json({ error: "only the creator can invite", code: "not_owner" });
+  if (!canInvite(m, currentUser(req))) {
+    // Say which of the two problems it is; "only the creator can invite" sent
+    // people hunting for a permission bug when they were simply signed out.
+    return res.status(403).json(currentUser(req)
+      ? { error: "your console sign-in is not a registered member — pick your name again", code: "not_registered" }
+      : { error: "sign in to the console (pick your name) before inviting", code: "not_signed_in" });
+  }
   const members = Array.isArray(req.body?.members) ? req.body.members : [];
   const sid = db.scheduleIdOf(m.id);
   let added = 0;
