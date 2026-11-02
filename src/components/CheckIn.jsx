@@ -115,13 +115,13 @@ export default function CheckIn({ meetingId, userId }) {
               {me.checkedOutAt ? (
                 <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 999, background: "#EDEBF7", color: ACCENT, fontSize: 14, fontWeight: 600 }}>👋 {t("checkin.checkedOut")}</div>
               ) : checkoutOpen ? (
-                <button onClick={doCheckOut} disabled={busy} style={{ width: "100%", height: 46, fontSize: 15, fontWeight: 600, borderRadius: 8, border: "none", cursor: busy ? "default" : "pointer", background: ACCENT, color: "#fff", opacity: busy ? 0.5 : 1 }}>👋 {busy ? t("checkin.checking") : t("checkin.checkout")}</button>
+                <button onClick={doCheckOut} disabled={busy} aria-busy={busy} style={{ width: "100%", height: 46, fontSize: 15, fontWeight: 600, borderRadius: 8, border: "none", cursor: busy ? "default" : "pointer", background: ACCENT, color: "#fff", opacity: busy ? 0.5 : 1 }}>👋 {busy ? t("checkin.checking") : t("checkin.checkout")}</button>
               ) : null}
             </div>
           ) : (
             <>
               <p style={{ margin: "0 0 14px", fontSize: 14, color: "var(--color-text-secondary)" }}>{t("checkin.greeting", { name })}</p>
-              <button onClick={doCheckIn} disabled={busy} style={{ ...btn(true), width: "100%", height: 48, fontSize: 16, opacity: busy ? 0.5 : 1 }}>{busy ? t("checkin.checking") : t("checkin.button")}</button>
+              <button onClick={doCheckIn} disabled={busy} aria-busy={busy} style={{ ...btn(true), width: "100%", height: 48, fontSize: 16, opacity: busy ? 0.5 : 1 }}>{busy ? t("checkin.checking") : t("checkin.button")}</button>
             </>
           )}
           {error ? <p style={{ margin: "10px 0 0", fontSize: 13, color: RED }}>⚠ {error}</p> : null}

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { api } from "../api.js";
 import { ACCENT, GREEN, RED, AMBER, card, label, input, btn, pill, LEAVE_TYPES } from "../ui.js";
 import { useT, fmtDateTimeI18n } from "../i18n.jsx";
+import { toast } from "../feedback.jsx";
 import { liffConfigured, getLiffProfile } from "../liff.js";
 import { attIcon } from "./Schedules.jsx";
 
@@ -64,10 +65,15 @@ export default function MyMeetings({ userId }) {
 
   async function setRsvp(it, value, leaveReason) {
     setBusyKey(keyOf(it)); setError("");
+    // Optimistic: light up the chosen button right away instead of after the
+    // round trip; the reload below confirms it (or restores it on failure).
+    const k = keyOf(it);
+    setItems((xs) => (xs || []).map((x) => (keyOf(x) === k ? { ...x, rsvp: value, leaveReason } : x)));
     try {
       await api.myMeetingsRsvp({ name, value, leaveReason, meetingId: it.meetingId, scheduleId: it.scheduleId, occKey: it.occKey });
+      toast(value === "yes" ? t("mymeetings.confirmed") : t("mymeetings.onLeave"));
       await load();
-    } catch (e) { setError(e.message); }
+    } catch (e) { setError(e.message); toast(e.message, "error"); load(); }
     finally { setBusyKey(""); }
   }
 
@@ -219,7 +225,7 @@ function Row({ it, t, lang, busy, onSet, onCheckout, userId }) {
   // Once a choice is made, its button is disabled (already selected); the other
   // stays clickable so they can still switch before the meeting.
   const optBtn = (active, color, text, onClick) => (
-    <button onClick={onClick} disabled={busy || active} style={{ flex: 1, height: 38, fontSize: 13, fontWeight: 500, borderRadius: 8, cursor: (busy || active) ? "default" : "pointer", border: active ? "none" : "0.5px solid rgba(0,0,0,.2)", background: active ? color : "transparent", color: active ? "#fff" : "var(--color-text-primary)", opacity: busy ? 0.6 : 1 }}>{text}</button>
+    <button onClick={onClick} disabled={busy || active} aria-busy={busy && active} style={{ flex: 1, height: 38, fontSize: 13, fontWeight: 500, borderRadius: 8, cursor: (busy || active) ? "default" : "pointer", border: active ? "none" : "0.5px solid rgba(0,0,0,.2)", background: active ? color : "transparent", color: active ? "#fff" : "var(--color-text-primary)", opacity: busy && !active ? 0.6 : 1 }}>{text}</button>
   );
   return (
     <div style={{ ...card, padding: "14px 16px", display: "flex", gap: 12, alignItems: "stretch", ...((ended || removed) ? { opacity: 0.7 } : {}) }}>
@@ -279,13 +285,13 @@ function Row({ it, t, lang, busy, onSet, onCheckout, userId }) {
       ) : canCheckout ? (
         <>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, height: 32, marginBottom: 8, borderRadius: 8, background: "#E1F5EE", color: GREEN, fontSize: 14, fontWeight: 600 }}>✓ {t("mymeetings.checkedIn")}</div>
-          <button onClick={() => onCheckout(it)} disabled={busy} style={{ width: "100%", height: 46, fontSize: 15, fontWeight: 600, borderRadius: 8, border: "none", cursor: busy ? "default" : "pointer", background: ACCENT, color: "#fff", opacity: busy ? 0.6 : 1 }}>👋 {t("checkin.checkout")}</button>
+          <button onClick={() => onCheckout(it)} disabled={busy} aria-busy={busy} style={{ width: "100%", height: 46, fontSize: 15, fontWeight: 600, borderRadius: 8, border: "none", cursor: busy ? "default" : "pointer", background: ACCENT, color: "#fff", opacity: busy ? 0.6 : 1 }}>👋 {t("checkin.checkout")}</button>
         </>
       ) : checkedIn ? (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, height: 44, borderRadius: 8, background: "#E1F5EE", color: GREEN, fontSize: 15, fontWeight: 600 }}>✓ {t("mymeetings.checkedIn")}</div>
       ) : ongoing ? (
         <>
-          <button onClick={goCheckin} disabled={going} style={{ width: "100%", height: 48, fontSize: 16, fontWeight: 600, borderRadius: 8, border: "none", cursor: going ? "default" : "pointer", background: GREEN, color: "#fff", opacity: going ? 0.6 : 1 }}>🙋 {t("checkin.button")}</button>
+          <button onClick={goCheckin} disabled={going} aria-busy={going} style={{ width: "100%", height: 48, fontSize: 16, fontWeight: 600, borderRadius: 8, border: "none", cursor: going ? "default" : "pointer", background: GREEN, color: "#fff", opacity: going ? 0.6 : 1 }}>🙋 {t("checkin.button")}</button>
           <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--color-text-tertiary,#999)", textAlign: "center" }}>{t("mymeetings.checkinHint")}</p>
         </>
       ) : ended ? (

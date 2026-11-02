@@ -137,7 +137,7 @@ const arrowBtn = {
 function SaveRow({ saving, saved, error, onSave, saveLabel, savedLabel }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 16 }}>
-      <button onClick={onSave} disabled={saving} style={{ ...btn(true), opacity: saving ? 0.5 : 1 }}>{saving ? "…" : saveLabel}</button>
+      <button onClick={onSave} disabled={saving} aria-busy={saving} style={{ ...btn(true), opacity: saving ? 0.5 : 1 }}>{saving ? "…" : saveLabel}</button>
       {saved ? <span style={{ fontSize: 13, color: GREEN }}>{savedLabel}</span> : null}
       {error ? <span style={{ fontSize: 13, color: RED }}>⚠ {error}</span> : null}
     </div>

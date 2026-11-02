@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { api } from "../api.js";
 import { ACCENT, GREEN, RED, AMBER, card, label, input, btn, pill, softBtn } from "../ui.js";
 import { useT, recurrenceTextI18n, fmtDateTimeI18n, ordinalText } from "../i18n.jsx";
+import { toast } from "../feedback.jsx";
 
 const NTHS = [1, 2, 3, 4, 5];
 const LEADS = [15, 60, 1440, 4320, 10080];
@@ -244,7 +245,7 @@ export function CreateForm({ dates = [], editMeeting = null, editId = null, onCr
           roster: pool.filter((p) => recipients.includes(p.id)).map((p) => ({ name: p.name, dept: p.dept, lineUserId: p.lineUserId })),
         });
         onCreated(); onClose();
-        alert(r?.series
+        toast(r?.series
           ? t("hostcal.editDoneSeries", { n: r.updated || 1, pushed: r?.pushed || 0 })
           : t("hostcal.editDone", { pushed: r?.pushed || 0 }));
       } catch (e) { setError(e.code === "not_owner" ? t("hostcal.errNotOwner") : e.message); }
@@ -284,7 +285,7 @@ export function CreateForm({ dates = [], editMeeting = null, editId = null, onCr
         notified = r?.notify?.count || 0;
       }
       setF({ ...f, title: "" }); setAttachments([]);
-      alert(notified > 0 ? t("sched.notified", { count: notified }) : t("sched.notifyNone"));
+      toast(notified > 0 ? t("sched.notified", { count: notified }) : t("sched.notifyNone"), notified > 0 ? "success" : "info");
       onCreated(); onClose();
     } catch (e) { setError(e.message); }
     finally { setSaving(false); }
@@ -478,7 +479,7 @@ export function CreateForm({ dates = [], editMeeting = null, editId = null, onCr
       {formError ? <p role="alert" style={{ margin: "0 0 10px", fontSize: 13, color: RED }}>⚠ {formError}</p> : null}
       <div style={{ display: "flex", gap: 8 }}>
         {(() => { const badTime = !!f.endTime && f.startTime >= f.endTime; return (
-          <button onClick={create} disabled={saving || badTime} style={{ ...btn(true), flex: 1, opacity: saving || badTime ? 0.5 : 1 }}>
+          <button onClick={create} disabled={saving || badTime} aria-busy={saving} style={{ ...btn(true), flex: 1, opacity: saving || badTime ? 0.5 : 1 }}>
             {editing ? (saving ? t("hostcal.editSaving") : t("hostcal.editSave")) : saving ? t("sched.creating") : multi ? t("sched.createMulti", { n: dates.length }) : t("sched.create")}
           </button>
         ); })()}

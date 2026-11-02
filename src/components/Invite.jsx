@@ -256,7 +256,7 @@ function ConfirmSection({ meetingId, pid, resp, reload, t, focused, requireIdent
     <div style={card}>
       <h3 style={{ margin: "0 0 8px", fontSize: 16, fontWeight: 500 }}>{t("confirm.heading")}</h3>
       <p style={{ margin: "0 0 16px", fontSize: 14, color: "var(--color-text-secondary)" }}>{t("confirm.desc")}</p>
-      <button onClick={confirm} disabled={busy} style={{ ...btn(true), width: "100%", opacity: busy ? 0.5 : 1 }}>
+      <button onClick={confirm} disabled={busy} aria-busy={busy} style={{ ...btn(true), width: "100%", opacity: busy ? 0.7 : 1 }}>
         {done ? t("confirm.done") : t("confirm.btn")}
       </button>
     </div>
@@ -288,7 +288,7 @@ function LeaveSection({ meetingId, pid, resp, reload, t, requireIdentity }) {
       <label style={label}>{t("leave.note")}{isOther ? t("leave.required") : t("leave.optional")}</label>
       <textarea style={textarea} value={text} onChange={(e) => setText(e.target.value)} placeholder={t("leave.placeholder")} />
       <div style={{ height: 14 }} />
-      <button onClick={submit} disabled={busy || (isOther && !text.trim())} style={{ ...btn(true), width: "100%", opacity: busy || (isOther && !text.trim()) ? 0.5 : 1 }}>
+      <button onClick={submit} disabled={busy || (isOther && !text.trim())} aria-busy={busy} style={{ ...btn(true), width: "100%", opacity: busy || (isOther && !text.trim()) ? 0.5 : 1 }}>
         {busy ? t("leave.submitting") : t("leave.submit")}
       </button>
       {ok ? <div style={{ marginTop: 12, padding: "0.7rem 1rem", background: "#E1F5EE", color: GREEN, borderRadius: 8, fontSize: 14 }}>{t("leave.done", { type: t(`leaveType.${type}`) })}</div> : null}
@@ -346,7 +346,7 @@ function AgendaSection({ meetingId, pid, meeting, resp, reload, t, requireIdenti
                 <textarea style={{ ...textarea, minHeight: 48 }} value={d.text} onChange={(e) => setDraft(tp.id, { text: e.target.value })} placeholder={t("agenda.commentPlaceholder")} />
               ) : null}
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
-                <button onClick={() => save(tp.id)} disabled={savingId === tp.id} style={{ ...btn(false), height: 30, fontSize: 12, padding: "0 14px" }}>{savingId === tp.id ? t("common.saving") : t("common.save")}</button>
+                <button onClick={() => save(tp.id)} disabled={savingId === tp.id} aria-busy={savingId === tp.id} style={{ ...btn(false), height: 30, fontSize: 12, padding: "0 14px" }}>{savingId === tp.id ? t("common.saving") : t("common.save")}</button>
                 {savedId === tp.id ? <span style={{ fontSize: 12, color: GREEN }}>{t("common.saved")}</span> : null}
               </div>
             </div>

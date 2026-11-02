@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { api } from "../api.js";
 import { card, btn, pill, avatar, GREEN, RED, ACCENT, AMBER, STANCE_META } from "../ui.js";
 import { useT } from "../i18n.jsx";
+import { toast, ask } from "../feedback.jsx";
 import { RecipientPicker, attIcon } from "./Schedules.jsx";
 
 export default function HostDashboard({ meetingId, go }) {
@@ -85,18 +86,18 @@ export default function HostDashboard({ meetingId, go }) {
       const r = await api.inviteToMeeting(meetingId, members);
       setShowInvite(false); setInviteSel([]);
       await load();
-      alert(t("host.inviteDone", { added: r.added, pushed: r.pushed }));
+      toast(t("host.inviteDone", { added: r.added, pushed: r.pushed }));
     } catch (e) { setError(e.message); }
     finally { setInviting(false); }
   }
 
   // Cancel the meeting: notify attendees on LINE, then it moves to the trash.
   async function cancelMeeting() {
-    if (!confirm(t("host.cancelConfirm", { title: meeting.title }))) return;
+    if (!(await ask({ message: t("host.cancelConfirm", { title: meeting.title }), danger: true }))) return;
     setCancelling(true); setError("");
     try {
       const r = await api.cancelMeeting(meetingId);
-      alert(t("host.cancelDone", { pushed: r.pushed, total: r.recipients }));
+      toast(t("host.cancelDone", { pushed: r.pushed, total: r.recipients }));
       go("host", {}); // back to the calendar; meeting is now in the Cancelled folder
     } catch (e) { setError(e.message); setCancelling(false); }
   }
@@ -104,7 +105,7 @@ export default function HostDashboard({ meetingId, go }) {
   // Delete the meeting: no LINE notice, just move it to the Deleted folder
   // (restorable). For schedule occurrences this also keeps it off the calendar.
   async function deleteMeeting() {
-    if (!confirm(t("host.deleteConfirm", { title: meeting.title }))) return;
+    if (!(await ask({ message: t("host.deleteConfirm", { title: meeting.title }), danger: true }))) return;
     setDeleting(true); setError("");
     try {
       await api.trashMeeting(meetingId);
@@ -115,12 +116,12 @@ export default function HostDashboard({ meetingId, go }) {
   // Send now: manually push this meeting's LINE notice immediately to its
   // attendees, regardless of any schedule send window.
   async function sendNow() {
-    if (!confirm(t("host.sendNowConfirm", { title: meeting.title }))) return;
+    if (!(await ask({ message: t("host.sendNowConfirm", { title: meeting.title }) }))) return;
     setSending(true); setError("");
     try {
       // Attendees only — a broadcast would also reach people who have left.
       const r = await api.notify(meetingId, "roster");
-      alert(t("host.sendNowDone", { pushed: r?.pushed || 0 }));
+      toast(t("host.sendNowDone", { pushed: r?.pushed || 0 }));
     } catch (e) { setError(e.message); }
     finally { setSending(false); }
   }
@@ -175,13 +176,13 @@ export default function HostDashboard({ meetingId, go }) {
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button onClick={() => go("host", { m: meetingId })} style={{ ...btn(false), height: 34, fontSize: 13 }}>{t("host.backToCalendar")}</button>
-            <button onClick={cancelMeeting} disabled={cancelling || deleting} style={{ height: 34, fontSize: 13, fontWeight: 500, padding: "0 14px", borderRadius: 8, cursor: cancelling ? "default" : "pointer", border: "none", background: RED, color: "#fff", opacity: cancelling ? 0.6 : 1 }}>
+            <button onClick={cancelMeeting} disabled={cancelling || deleting} aria-busy={cancelling} style={{ height: 34, fontSize: 13, fontWeight: 500, padding: "0 14px", borderRadius: 8, cursor: cancelling ? "default" : "pointer", border: "none", background: RED, color: "#fff", opacity: cancelling ? 0.6 : 1 }}>
               {cancelling ? t("host.cancelling") : t("host.cancelMeeting")}
             </button>
-            <button onClick={deleteMeeting} disabled={cancelling || deleting} style={{ ...btn(false), height: 34, fontSize: 13, color: RED, borderColor: RED + "55", opacity: deleting ? 0.6 : 1 }}>
+            <button onClick={deleteMeeting} disabled={cancelling || deleting} aria-busy={deleting} style={{ ...btn(false), height: 34, fontSize: 13, color: RED, borderColor: RED + "55", opacity: deleting ? 0.6 : 1 }}>
               {deleting ? t("host.deleting") : t("host.deleteMeeting")}
             </button>
-            <button onClick={sendNow} disabled={sending || cancelling || deleting} style={{ ...btn(true), height: 34, fontSize: 13, opacity: sending ? 0.6 : 1 }}>
+            <button onClick={sendNow} disabled={sending || cancelling || deleting} aria-busy={sending} style={{ ...btn(true), height: 34, fontSize: 13, opacity: sending ? 0.6 : 1 }}>
               {sending ? t("host.sending") : t("host.sendNow")}
             </button>
           </div>
@@ -222,7 +223,7 @@ export default function HostDashboard({ meetingId, go }) {
                   <>
                     <RecipientPicker pool={availPool} recipients={inviteSel} setRecipients={setInviteSel} />
                     <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                      <button onClick={() => submitInvite(availPool)} disabled={inviting || n === 0} style={{ ...btn(true), height: 36, fontSize: 13, opacity: (inviting || n === 0) ? 0.5 : 1 }}>{inviting ? t("host.inviting") : t("host.inviteN", { n })}</button>
+                      <button onClick={() => submitInvite(availPool)} disabled={inviting || n === 0} aria-busy={inviting} style={{ ...btn(true), height: 36, fontSize: 13, opacity: (inviting || n === 0) ? 0.5 : 1 }}>{inviting ? t("host.inviting") : t("host.inviteN", { n })}</button>
                       <button onClick={() => setShowInvite(false)} style={{ ...btn(false), height: 36, fontSize: 13 }}>{t("common.cancel")}</button>
                     </div>
                   </>

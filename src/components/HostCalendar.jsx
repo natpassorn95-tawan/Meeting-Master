@@ -364,7 +364,7 @@ function EventRow({ ev, past, t, lang, busy, onOpen, onEdit }) {
       </button>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         {!past ? (
-          <button onClick={() => onEdit(ev)} disabled={busy} style={{ ...softBtn(ACCENT), opacity: busy ? 0.5 : 1 }}>{t("hostcal.editEvent")}</button>
+          <button onClick={() => onEdit(ev)} disabled={busy} aria-busy={busy} style={{ ...softBtn(ACCENT), opacity: busy ? 0.5 : 1 }}>{t("hostcal.editEvent")}</button>
         ) : null}
         <span onClick={() => !busy && onOpen(ev)} style={{ ...btn(true), height: 32, fontSize: 13, display: "inline-flex", alignItems: "center", cursor: busy ? "default" : "pointer" }}>{t("hostcal.open")}</span>
       </div>

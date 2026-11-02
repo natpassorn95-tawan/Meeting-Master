@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { api } from "../api.js";
 import { ACCENT, GREEN, RED, AMBER, card, btn, softBtn, pill, avatar, jobTitleLabel, departmentLabel } from "../ui.js";
 import { useT } from "../i18n.jsx";
+import { toast, ask } from "../feedback.jsx";
 
 export default function Members({ go }) {
   const { t, lang } = useT();
@@ -33,11 +34,11 @@ export default function Members({ go }) {
     const who = (members || []).find((m) => m.lineUserId === userId);
     // Marking someone as left cuts them off and removes them from upcoming
     // meetings — confirm first so a mis-click can't do that silently.
-    if (!active && !confirm(t("members.deactivateConfirm", { name: who?.name || userId }))) return;
+    if (!active && !(await ask({ message: t("members.deactivateConfirm", { name: who?.name || userId }), danger: true }))) return;
     try {
       const m = await api.setMemberActive(userId, active);
       load();
-      if (!active) alert(t("members.deactivateDone", { name: m?.name || who?.name || userId, s: m?.removedFrom?.schedules || 0, n: m?.removedFrom?.meetings || 0 }));
+      if (!active) toast(t("members.deactivateDone", { name: m?.name || who?.name || userId, s: m?.removedFrom?.schedules || 0, n: m?.removedFrom?.meetings || 0 }));
     }
     catch (e) { setError(e.message); }
   }
@@ -46,10 +47,12 @@ export default function Members({ go }) {
   // type the person's name — a mis-click on the button alone does nothing.
   async function forget(m) {
     setError("");
-    const typed = prompt(t("members.forgetConfirm", { name: m.name || m.lineUserId }));
+    const who = m.name || m.lineUserId;
+    // The confirm button stays disabled until the typed name matches.
+    const typed = await ask({ message: t("members.forgetConfirm", { name: who }), input: true, mustMatch: who, placeholder: who, danger: true, confirmText: t("members.forget") });
     if (typed == null) return;
-    if (typed.trim() !== (m.name || m.lineUserId).trim()) { alert(t("members.forgetMismatch")); return; }
-    try { await api.forgetMember(m.lineUserId); load(); alert(t("members.forgetDone", { name: m.name || m.lineUserId })); }
+    if (typed.trim() !== who.trim()) { toast(t("members.forgetMismatch"), "error"); return; }
+    try { await api.forgetMember(m.lineUserId); load(); toast(t("members.forgetDone", { name: who })); }
     catch (e) { setError(e.message); }
   }
 
