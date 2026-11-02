@@ -83,5 +83,6 @@ export const api = {
   getMember: (userId) => req(`/members/${encodeURIComponent(userId)}`),
   registerMember: (userId, body) => post(`/members/${encodeURIComponent(userId)}/register`, body),
   setMemberActive: (userId, active) => patch(`/members/${encodeURIComponent(userId)}`, { active }),
+  forgetMember: (userId) => del(`/members/${encodeURIComponent(userId)}`),
   simulateFollow: (userId) => post("/members/simulate-follow", { userId }),
 };

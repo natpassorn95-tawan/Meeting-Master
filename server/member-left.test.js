@@ -47,3 +47,19 @@ test("marking a member inactive blocks them and removes them from future meeting
   db.setMemberActive(LEFT, true);
   assert.equal(db.isBlockedUser(LEFT), false);
 });
+
+test("forget: only after inactive; deletes the record but keeps them blocked", () => {
+  const GONE = "U" + "3".repeat(32);
+  db.registerMember(GONE, { name: "已離開", employeeId: "T3", email: "c@x", jobTitle: "x", department: "x" });
+
+  const early = db.forgetMember(GONE);
+  assert.equal(early.code, "still_active", "an active member cannot be forgotten");
+  assert.ok(db.getMember(GONE));
+
+  db.setMemberActive(GONE, false);
+  assert.deepEqual(db.forgetMember(GONE), { ok: true });
+  assert.equal(db.getMember(GONE), null, "personal details gone");
+  assert.equal(db.listMembers().some((m) => m.lineUserId === GONE), false);
+  assert.equal(db.isBlockedUser(GONE), true, "still blocked after being forgotten");
+  assert.equal(db.forgetMember(GONE).status, 404);
+});

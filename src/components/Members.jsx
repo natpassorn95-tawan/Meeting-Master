@@ -42,6 +42,17 @@ export default function Members({ go }) {
     catch (e) { setError(e.message); }
   }
 
+  // Permanently forget someone who has left. Irreversible, so the operator must
+  // type the person's name — a mis-click on the button alone does nothing.
+  async function forget(m) {
+    setError("");
+    const typed = prompt(t("members.forgetConfirm", { name: m.name || m.lineUserId }));
+    if (typed == null) return;
+    if (typed.trim() !== (m.name || m.lineUserId).trim()) { alert(t("members.forgetMismatch")); return; }
+    try { await api.forgetMember(m.lineUserId); load(); alert(t("members.forgetDone", { name: m.name || m.lineUserId })); }
+    catch (e) { setError(e.message); }
+  }
+
   // Export the member list to a CSV the operator can open in Excel / Sheets.
   // Built entirely client-side (no push, no server round-trip). A UTF-8 BOM keeps
   // Chinese names readable in Excel; localized headers + department/title/status.
@@ -139,7 +150,13 @@ export default function Members({ go }) {
                     >
                       {inactive ? `⚫ ${t("members.inactive")}` : `🟢 ${t("members.active")}`}
                     </button>
-                  ) : (
+                  ) : null}
+                  {reg && inactive ? (
+                    <button onClick={() => forget(m)} title={t("members.forgetHint")} style={{ ...softBtn(RED), height: 30 }}>
+                      🗑 {t("members.forget")}
+                    </button>
+                  ) : null}
+                  {reg ? null : (
                     <button onClick={() => go("register", { u: m.lineUserId })} style={{ ...btn(false), height: 28, fontSize: 11, padding: "0 10px" }}>{t("members.openForm")}</button>
                   )}
                 </div>

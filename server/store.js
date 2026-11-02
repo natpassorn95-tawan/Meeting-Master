@@ -26,7 +26,7 @@ function fmtDatetime(date, start, end) {
   return time ? `${dateStr} ${time}` : dateStr;
 }
 
-const store = { meetings: {}, order: [], schedules: {}, scheduleOrder: [], members: {}, standing: {}, deleted: {}, cancelled: {}, tombstones: {} };
+const store = { meetings: {}, order: [], schedules: {}, scheduleOrder: [], members: {}, standing: {}, deleted: {}, cancelled: {}, tombstones: {}, blockedLineIds: [] };
 
 // ── Persistence (data/store.json) ──────────────────────────────────────
 // MM_DATA_FILE relocates the store (tests point it at a temp dir; an operator
@@ -49,7 +49,7 @@ function saveStore() {
     const json = JSON.stringify({
       meetings: store.meetings, order: store.order,
       schedules: store.schedules, scheduleOrder: store.scheduleOrder,
-      members: store.members, standing: store.standing, deleted: store.deleted, cancelled: store.cancelled, tombstones: store.tombstones, seq,
+      members: store.members, standing: store.standing, deleted: store.deleted, cancelled: store.cancelled, tombstones: store.tombstones, blockedLineIds: store.blockedLineIds, seq,
     });
     // Force the bytes to disk before the rename, so the swap can never publish
     // a file whose contents are still sitting in the OS write cache.
@@ -104,6 +104,7 @@ function readStoreFile(file) {
     store.deleted = d.deleted || {};
     store.cancelled = d.cancelled || {};
     store.tombstones = d.tombstones || {};
+    store.blockedLineIds = Array.isArray(d.blockedLineIds) ? d.blockedLineIds : [];
     if (typeof d.seq === "number") seq = d.seq;
     console.log(`[store] loaded ${store.order.length} meetings, ${store.scheduleOrder.length} schedules, ${Object.keys(store.members).length} members`);
   }
@@ -188,8 +189,24 @@ function setMemberActive(userId, active) {
 // record is KEPT (not deleted) on purpose — deleting it would let the next
 // "follow" / keyword re-create them as a fresh pending member.
 function isBlockedUser(userId) {
-  const m = userId ? store.members[userId] : null;
-  return !!m && m.active === false;
+  if (!userId) return false;
+  if (store.blockedLineIds.includes(userId)) return true;   // forgotten
+  const m = store.members[userId];
+  return !!m && m.active === false;                          // inactive (left)
+}
+// "Forget" someone who left: delete their member record (name, employee ID,
+// email, job title, department). Only their bare LINE userId is kept, on a
+// block list — without it the next follow / register keyword would let them
+// straight back in as a new member. Past meeting records (attendance history)
+// are not rewritten. Must be marked inactive first.
+function forgetMember(userId) {
+  const m = store.members[userId];
+  if (!m) return { error: "member not found", status: 404 };
+  if (m.active !== false) return { error: "mark the member inactive (left) first", status: 409, code: "still_active" };
+  removeFromFutureMeetings(userId);
+  delete store.members[userId];
+  if (!store.blockedLineIds.includes(userId)) store.blockedLineIds.push(userId);
+  return { ok: true };
 }
 // Take someone who left off every recurring schedule and every meeting from
 // today onward. Past meetings keep them, so attendance history stays intact.
@@ -1014,6 +1031,7 @@ export {
   setRoster,
   editMeetingScope,
   isBlockedUser,
+  forgetMember,
   addParticipant,
   addScheduleInvitee,
   listMeetings,

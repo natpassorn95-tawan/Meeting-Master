@@ -827,6 +827,7 @@ app.get("/api/members/:userId", (req, res) => {
 
 // Complete registration from the web form linked in the welcome message.
 app.post("/api/members/:userId/register", (req, res) => {
+  if (db.isBlockedUser(req.params.userId)) return res.status(403).json({ error: "this account can no longer register", code: "blocked" });
   const { name, employeeId, email, jobTitle, department } = req.body || {};
   if (!String(name || "").trim()) return res.status(400).json({ error: "name is required" });
   if (!String(employeeId || "").trim()) return res.status(400).json({ error: "employeeId is required" });
@@ -851,13 +852,20 @@ app.post("/api/members/:userId/register", (req, res) => {
 // Set a member's employment status: active (with the company) or inactive.
 app.patch("/api/members/:userId", (req, res) => {
   if (typeof req.body?.active !== "boolean") return res.status(400).json({ error: "active (boolean) required" });
+  // Never lock out a super admin by mistake.
+  if (req.body.active === false && isSuperAdmin(req.params.userId)) {
+    return res.status(409).json({ error: "a super admin cannot be marked inactive", code: "super_admin" });
+  }
   const m = db.setMemberActive(req.params.userId, req.body.active);
   if (!m) return res.status(404).json({ error: "member not found" });
   res.json(m);
 });
 
+// Permanently forget a member who has left (see db.forgetMember). Only an
+// inactive member can be forgotten, so this is always a deliberate 2nd step.
 app.delete("/api/members/:userId", (req, res) => {
-  db.deleteMember(req.params.userId);
+  const r = db.forgetMember(req.params.userId);
+  if (r.error) return res.status(r.status).json({ error: r.error, code: r.code });
   res.status(204).end();
 });
 
