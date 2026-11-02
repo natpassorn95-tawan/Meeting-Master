@@ -360,6 +360,52 @@ function addParticipant(meetingId, { name, dept, employeeId, lineUserId }) {
   return p;
 }
 
+// Edit a meeting, optionally together with every later date of its recurring
+// schedule (scope "future"). Before this, fixing a weekly meeting's attendees
+// meant opening and saving every date one by one.
+//   - "one":    only this meeting (its date may change).
+//   - "future": this meeting + every already-created later occurrence, AND the
+//               parent schedule, so dates not created yet pick up the change.
+//               The date itself stays per-occurrence (a series keeps its weekday).
+// Responses already collected are kept (updateMeetingMeta / setTopics /
+// setRoster all reconcile by identity). Returns the meetings that changed.
+function editMeetingScope(id, { meta = {}, topics, roster, scope = "one" } = {}) {
+  const m = getMeeting(id);
+  if (!m) return null;
+  const sid = scheduleIdOf(m.id);
+  const s = sid ? store.schedules[sid] : null;
+  const series = scope === "future" && !!s;
+  const targets = [m];
+  if (series) {
+    for (const x of listMeetings()) {
+      if (x.id !== m.id && scheduleIdOf(x.id) === sid && (x.date || "") >= (m.date || "")) targets.push(x);
+    }
+  }
+  const { date, ...seriesMeta } = meta;
+  for (const x of targets) {
+    updateMeetingMeta(x.id, x === m ? meta : seriesMeta);
+    if (Array.isArray(topics)) setTopics(x.id, topics);
+    if (Array.isArray(roster)) setRoster(x.id, roster);
+  }
+  if (series) {
+    // Copy from the edited meeting so values are already normalised (URL etc.).
+    for (const k of ["title", "location", "onlineUrl", "host", "startTime", "endTime", "visibility"]) {
+      if (meta[k] != null) s[k] = m[k];
+    }
+    if (Array.isArray(meta.attachments)) s.attachments = meta.attachments;
+    if (Array.isArray(topics)) s.topics = m.topics.map((t) => ({ title: t.title }));
+    if (Array.isArray(roster)) {
+      // Schedule roster ids are LINE userIds (see CreateForm), and recipientIds
+      // picks who is notified. Keep them in lockstep so a deselected person
+      // stops getting future notices.
+      const bound = m.roster.filter((p) => p.lineUserId);
+      s.roster = bound.map((p) => ({ id: p.lineUserId, name: p.name, dept: p.dept || "—", lineUserId: p.lineUserId }));
+      s.recipientIds = bound.map((p) => p.lineUserId);
+    }
+  }
+  return { meeting: m, updated: targets, series };
+}
+
 function listMeetings() {
   return store.order.map((id) => store.meetings[id]).filter(Boolean);
 }
@@ -929,6 +975,7 @@ export {
   updateMeetingMeta,
   setTopics,
   setRoster,
+  editMeetingScope,
   addParticipant,
   addScheduleInvitee,
   listMeetings,

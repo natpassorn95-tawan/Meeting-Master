@@ -134,8 +134,14 @@ export function ScheduleList({ go, reloadToken, onMutated }) {
 // admin selected on the calendar (drag for a range): one date → a single meeting
 // (freq still switchable to weekly/monthly); multiple dates → a one-time meeting
 // is created on each selected day. Self-loads its recipient pool from Members.
-export function CreateForm({ dates = [], editMeeting = null, editId = null, onCreated, onClose, setError }) {
+export function CreateForm({ dates = [], editMeeting = null, editId = null, onCreated, onClose, setError: setParentError }) {
   const { t, lang, weekdayFull } = useT();
+  const [formError, setFormError] = useState("");
+  // Recurring meetings: apply the edit to this date only, or to this and every
+  // later date of the series (default: this date only — the safer choice).
+  const recurring = !!editMeeting?.recurring;
+  const [editScope, setEditScope] = useState("one");
+  const setError = (msg) => { setFormError(msg); if (setParentError) setParentError(msg); };
   const editing = !!editMeeting;
   const multi = !editing && dates.length > 1;
   const [pool, setPool] = useState([]);
@@ -231,13 +237,17 @@ export function CreateForm({ dates = [], editMeeting = null, editId = null, onCr
     if (editing) {
       setSaving(true); setError("");
       try {
-        await api.updateMeta(editId, { title: f.title.trim(), location: f.location.trim(), onlineUrl: f.onlineUrl.trim(), host: f.host.trim(), date: f.date, startTime: f.startTime, endTime: f.endTime, visibility: f.visibility, attachments });
-        await api.setTopics(editId, f.topics.split("\n").map((x) => x.trim()).filter(Boolean).map((title) => ({ title })));
-        await api.setRoster(editId, pool.filter((p) => recipients.includes(p.id)).map((p) => ({ name: p.name, dept: p.dept, lineUserId: p.lineUserId })));
-        const r = await api.notifyUpdate(editId).catch(() => ({ pushed: 0 }));
+        const r = await api.editMeeting(editId, {
+          scope: editScope,
+          meta: { title: f.title.trim(), location: f.location.trim(), onlineUrl: f.onlineUrl.trim(), host: f.host.trim(), date: f.date, startTime: f.startTime, endTime: f.endTime, visibility: f.visibility, attachments },
+          topics: f.topics.split("\n").map((x) => x.trim()).filter(Boolean).map((title) => ({ title })),
+          roster: pool.filter((p) => recipients.includes(p.id)).map((p) => ({ name: p.name, dept: p.dept, lineUserId: p.lineUserId })),
+        });
         onCreated(); onClose();
-        alert(t("hostcal.editDone", { pushed: r?.pushed || 0 }));
-      } catch (e) { setError(e.message); }
+        alert(r?.series
+          ? t("hostcal.editDoneSeries", { n: r.updated || 1, pushed: r?.pushed || 0 })
+          : t("hostcal.editDone", { pushed: r?.pushed || 0 }));
+      } catch (e) { setError(e.code === "not_owner" ? t("hostcal.errNotOwner") : e.message); }
       finally { setSaving(false); }
       return;
     }
@@ -444,6 +454,28 @@ export function CreateForm({ dates = [], editMeeting = null, editId = null, onCr
       ) : null}
 
       <div style={{ height: 18 }} />
+      {recurring ? (
+        <div style={{ margin: "0 0 14px" }}>
+          <label style={label}>{t("hostcal.scope")}</label>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {[["one", t("hostcal.scopeOne")], ["future", t("hostcal.scopeFuture")]].map(([val, lbl]) => {
+              const on = editScope === val;
+              return (
+                <button key={val} type="button" onClick={() => setEditScope(val)} aria-pressed={on}
+                  style={{ ...btn(on), flex: "1 1 180px", height: 38, fontSize: 13 }}>
+                  {on ? "✓ " : ""}{lbl}
+                </button>
+              );
+            })}
+          </div>
+          <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-text-tertiary,#999)" }}>
+            {editScope === "future" ? t("hostcal.scopeFutureHint") : t("hostcal.scopeOneHint")}
+          </p>
+        </div>
+      ) : null}
+      {/* Errors must show inside the popup: the parent's error line sits behind
+          the modal overlay, so a failed save used to look like "nothing happened". */}
+      {formError ? <p role="alert" style={{ margin: "0 0 10px", fontSize: 13, color: RED }}>⚠ {formError}</p> : null}
       <div style={{ display: "flex", gap: 8 }}>
         {(() => { const badTime = !!f.endTime && f.startTime >= f.endTime; return (
           <button onClick={create} disabled={saving || badTime} style={{ ...btn(true), flex: 1, opacity: saving || badTime ? 0.5 : 1 }}>

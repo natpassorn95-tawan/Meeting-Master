@@ -243,7 +243,11 @@ app.get("/api/meetings/:id", (req, res) => {
   if (!m) return res.status(404).json({ error: "meeting not found" });
   const uid = currentUser(req);
   if (uid && !canSee(m, uid)) return res.status(403).json({ error: "not visible to you", code: "not_visible" });
-  res.json(db.withScheduleAttachments(m));
+  // Tell the editor whether this date belongs to a weekly / monthly series, so
+  // it can offer "this date only" vs "this and all later dates".
+  const sched = db.getSchedule(db.scheduleIdOf(m.id) || "");
+  const recurring = !!sched && sched.recurrence?.freq !== "once";
+  res.json({ ...db.withScheduleAttachments(m), recurring });
 });
 
 // Admin maintenance: edit meeting basics / agenda / roster (responses kept).
@@ -390,6 +394,30 @@ app.post("/api/meetings/:id/notify-update", async (req, res) => {
     }
   }
   res.json({ ok: true, pushed, recipients });
+});
+
+// Save the meeting editor in one call: details + agenda + attendees, applied to
+// this date only (scope "one") or to this and every later date of its weekly /
+// monthly schedule (scope "future"). Then tell everyone still invited, once
+// each, that it changed. Creator-only, like the other edit endpoints.
+app.post("/api/meetings/:id/edit", async (req, res) => {
+  const m = db.getMeeting(req.params.id);
+  if (!m) return res.status(404).json({ error: "meeting not found" });
+  if (!canEdit(m, currentUser(req))) return res.status(403).json({ error: "only the creator can update this meeting", code: "not_owner" });
+  const { meta = {}, topics, roster, scope = "one", notify = true } = req.body || {};
+  if (meta.startTime && meta.endTime && meta.startTime >= meta.endTime) {
+    return res.status(400).json({ error: "start time must be before end time" });
+  }
+  const r = db.editMeetingScope(m.id, { meta, topics, roster, scope: scope === "future" ? "future" : "one" });
+  let pushed = 0, recipients = 0;
+  if (notify && LINE_CONFIGURED) {
+    const ids = new Set();
+    for (const x of r.updated) for (const p of x.roster) if (/^U[0-9a-f]{32}$/.test(p.lineUserId || "")) ids.add(p.lineUserId);
+    recipients = ids.size;
+    const msg = [buildUpdateMessage(r.meeting, { series: r.series })];
+    for (const uid of ids) { try { await pushTo(uid, msg); pushed++; } catch { /* keep going */ } }
+  }
+  res.json({ ok: true, updated: r.updated.length, series: r.series, pushed, recipients });
 });
 
 // Cancel a meeting: notify every attendee (with a real LINE userId) that it is

@@ -299,7 +299,7 @@ export function buildBatchNoticeMessage({ title, location, onlineUrl, startTime,
   };
 }
 // Flex card sent when a meeting's details are updated.
-export function buildUpdateMessage(meeting) {
+export function buildUpdateMessage(meeting, { series = false } = {}) {
   const title = meeting.title || "（未命名會議）";
   const datetime = meeting.datetime || "—";
   const location = meeting.location || "";
@@ -314,6 +314,7 @@ export function buildUpdateMessage(meeting) {
     ],
   });
   const rows = [row("時間 Time", datetime)];
+  if (series) rows.push(row("適用 Applies", "此日起所有場次 This and all later dates"));
   if (location) rows.push(row("地點 Venue", location));
   if (onlineUrl) rows.push(row("線上 Online", "見下方按鈕 See button"));
   if (host) rows.push(row("主持 Host", host));

@@ -7,7 +7,9 @@ async function req(path, options = {}) {
   const res = await fetch(`/api${path}`, { ...options, headers });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `Request failed: ${res.status}`);
+    const err = new Error(body.error || `Request failed: ${res.status}`);
+    err.code = body.code; err.status = res.status;
+    throw err;
   }
   if (res.status === 204) return null;
   return res.json();
@@ -37,6 +39,7 @@ export const api = {
   createMeeting: (m) => post("/meetings", m),
   updateMeta: (id, patchBody) => patch(`/meetings/${id}/meta`, patchBody),
   notifyUpdate: (id) => post(`/meetings/${id}/notify-update`),
+  editMeeting: (id, body) => post(`/meetings/${id}/edit`, body),
   setTopics: (id, topics) => put(`/meetings/${id}/topics`, { topics }),
   setRoster: (id, roster) => put(`/meetings/${id}/roster`, { roster }),
   enroll: (id, person) => post(`/meetings/${id}/enroll`, person),
