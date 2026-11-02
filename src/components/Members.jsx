@@ -30,7 +30,15 @@ export default function Members({ go }) {
 
   async function setActive(userId, active) {
     setError("");
-    try { await api.setMemberActive(userId, active); load(); }
+    const who = (members || []).find((m) => m.lineUserId === userId);
+    // Marking someone as left cuts them off and removes them from upcoming
+    // meetings — confirm first so a mis-click can't do that silently.
+    if (!active && !confirm(t("members.deactivateConfirm", { name: who?.name || userId }))) return;
+    try {
+      const m = await api.setMemberActive(userId, active);
+      load();
+      if (!active) alert(t("members.deactivateDone", { name: m?.name || who?.name || userId, s: m?.removedFrom?.schedules || 0, n: m?.removedFrom?.meetings || 0 }));
+    }
     catch (e) { setError(e.message); }
   }
 

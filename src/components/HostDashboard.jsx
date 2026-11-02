@@ -112,14 +112,15 @@ export default function HostDashboard({ meetingId, go }) {
     } catch (e) { setError(e.message); setDeleting(false); }
   }
 
-  // Send now: manually push this meeting's LINE notice immediately (broadcast to
-  // the OA's followers), regardless of any schedule send window.
+  // Send now: manually push this meeting's LINE notice immediately to its
+  // attendees, regardless of any schedule send window.
   async function sendNow() {
     if (!confirm(t("host.sendNowConfirm", { title: meeting.title }))) return;
     setSending(true); setError("");
     try {
-      await api.notify(meetingId, "broadcast");
-      alert(t("host.sendNowDone"));
+      // Attendees only — a broadcast would also reach people who have left.
+      const r = await api.notify(meetingId, "roster");
+      alert(t("host.sendNowDone", { pushed: r?.pushed || 0 }));
     } catch (e) { setError(e.message); }
     finally { setSending(false); }
   }

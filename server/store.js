@@ -175,7 +175,44 @@ function setMemberActive(userId, active) {
   const m = store.members[userId];
   if (!m) return null;
   m.active = !!active;
+  if (!m.active) {
+    m.inactiveAt = Date.now();
+    m.removedFrom = removeFromFutureMeetings(userId);
+  } else {
+    delete m.inactiveAt;
+  }
   return m;
+}
+// A member marked inactive (left the company) is cut off: no LINE pushes, the
+// OA ignores their messages, and their console identity stops working. The
+// record is KEPT (not deleted) on purpose — deleting it would let the next
+// "follow" / keyword re-create them as a fresh pending member.
+function isBlockedUser(userId) {
+  const m = userId ? store.members[userId] : null;
+  return !!m && m.active === false;
+}
+// Take someone who left off every recurring schedule and every meeting from
+// today onward. Past meetings keep them, so attendance history stays intact.
+// Re-activating does not put them back; invite them again if they return.
+function removeFromFutureMeetings(userId) {
+  let schedules = 0, meetings = 0;
+  for (const s of Object.values(store.schedules)) {
+    const before = (s.roster || []).length + (s.recipientIds || []).length;
+    s.roster = (s.roster || []).filter((p) => p.lineUserId !== userId && p.id !== userId);
+    s.recipientIds = (s.recipientIds || []).filter((x) => x !== userId);
+    if ((s.roster.length + s.recipientIds.length) !== before) schedules++;
+  }
+  const today = ymd(new Date());
+  for (const m of Object.values(store.meetings)) {
+    if (!m.date || m.date < today) continue;
+    if (!(m.roster || []).some((p) => p.lineUserId === userId)) continue;
+    m.roster = m.roster.filter((p) => p.lineUserId !== userId);
+    for (const [pid, r] of Object.entries(m.responses || {})) {
+      if (r?.lineUserId === userId) delete m.responses[pid];
+    }
+    meetings++;
+  }
+  return { schedules, meetings };
 }
 
 function blankResponse(p) {
@@ -976,6 +1013,7 @@ export {
   setTopics,
   setRoster,
   editMeetingScope,
+  isBlockedUser,
   addParticipant,
   addScheduleInvitee,
   listMeetings,

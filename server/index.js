@@ -17,7 +17,7 @@ import {
   getBotInfo,
   getQuota,
   broadcast,
-  pushTo,
+  pushTo as linePushTo,
   multicast,
   replyMessage,
   verifySignature,
@@ -35,6 +35,14 @@ try {
 
 const PORT = process.env.PORT || 8899;
 const LINE_CONFIGURED = !!process.env.LINE_CHANNEL_ACCESS_TOKEN;
+
+// Every push goes through here, so someone marked inactive (left the company)
+// can never be messaged — whichever feature sends (notice, reminder, update,
+// check-in, cancel). Rejects like a failed push, which callers already skip.
+function pushTo(userId, messages) {
+  if (db.isBlockedUser(userId)) return Promise.reject(new Error("member is inactive (left) — not sent"));
+  return linePushTo(userId, messages);
+}
 // Public origin participant deep-links point at. For LAN demos set this to
 // http://<your-LAN-IP>:5273; for real LINE delivery it must be https.
 const BASE_URL = process.env.PUBLIC_BASE_URL || "http://localhost:5273";
@@ -140,7 +148,12 @@ app.get("/api/line/status", async (_req, res) => {
 // private ones only to the creator + invited recipients. NOTE: the header is
 // client-supplied — this scopes access for an internal tool, it is not
 // cryptographic authentication.
-function currentUser(req) { return String(req.get("x-mm-user") || "").trim(); }
+function currentUser(req) {
+  const uid = String(req.get("x-mm-user") || "").trim();
+  // A browser still signed in as someone who has since left gets no identity:
+  // cannot create, edit, invite or see private meetings.
+  return db.isBlockedUser(uid) ? "" : uid;
+}
 function invitedIds(obj) {
   const ids = new Set();
   if (Array.isArray(obj?.recipientIds)) obj.recipientIds.forEach((x) => ids.add(x));
@@ -365,6 +378,16 @@ app.post("/api/meetings/:id/notify", async (req, res) => {
       if (!target) return res.status(400).json({ error: "push mode needs a userId (to)" });
       const result = await pushTo(target, messages);
       return res.json({ ok: true, mode: "push", to: target, result });
+    }
+    if (mode === "roster") {
+      // Push to this meeting's attendees only (never to every OA friend, which
+      // would include people who have left the company).
+      let pushed = 0;
+      for (const p of m.roster) {
+        if (!/^U[0-9a-f]{32}$/.test(p.lineUserId || "")) continue;
+        try { await pushTo(p.lineUserId, messages); pushed++; } catch { /* inactive / failed: skip */ }
+      }
+      return res.json({ ok: true, mode: "roster", pushed });
     }
     const result = await broadcast(messages);
     res.json({ ok: true, mode: "broadcast", result });
@@ -720,6 +743,9 @@ app.post("/api/line/webhook", async (req, res) => {
   const events = req.body?.events || [];
   for (const ev of events) {
     const userId = ev.source?.userId;
+    // Left the company → the OA ignores them entirely (no replies, no links,
+    // no re-registration).
+    if (userId && db.isBlockedUser(userId)) { console.log(`[webhook] ignored ${ev.type} from inactive member ${userId}`); continue; }
     if (ev.type === "follow" && userId) {
       // First time adding the OA → create a pending member and ask them to
       // register Name / Employee ID / Email.
