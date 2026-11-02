@@ -151,15 +151,29 @@ function invitedIds(obj) {
   if (sid) { const s = db.getSchedule(sid); if (s && Array.isArray(s.recipientIds)) s.recipientIds.forEach((x) => ids.add(x)); }
   return [...ids];
 }
+// Super admins can see and fix ANY meeting / schedule, whoever created it.
+// Keyed on employee ID (stable across LINE re-registration). T1188 = 歐寶.
+// Override with SUPER_ADMIN_EMPLOYEE_IDS="T1188,T0001" in .env.
+const SUPER_ADMIN_EMPLOYEE_IDS = new Set(
+  String(process.env.SUPER_ADMIN_EMPLOYEE_IDS ?? "T1188")
+    .split(",").map((x) => x.trim().toUpperCase()).filter(Boolean),
+);
+function isSuperAdmin(uid) {
+  const member = uid ? db.getMember(uid) : null;
+  return !!member && member.status === "registered" && member.active !== false
+    && SUPER_ADMIN_EMPLOYEE_IDS.has(String(member.employeeId || "").trim().toUpperCase());
+}
 function canSee(obj, uid) {
   if (!obj) return false;
   if (obj.visibility !== "private") return true;              // public / legacy → everyone
+  if (isSuperAdmin(uid)) return true;                          // super admin sees everything
   if (obj.creatorId && obj.creatorId === uid) return true;    // the creator
   return invitedIds(obj).includes(uid);                        // an invited recipient
 }
 function canEdit(obj, uid) {
   if (!obj) return false;
   if (!obj.creatorId) return true;          // legacy (no creator) → anyone can manage
+  if (isSuperAdmin(uid)) return true;       // super admin may fix any meeting
   return obj.creatorId === uid;             // otherwise only the creator
 }
 // Inviting is collaborative: several admins share meeting admin here, and the
